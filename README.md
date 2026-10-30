@@ -13,6 +13,9 @@ janelas (Tkinter) e terminal. Há também uma API REST opcional.
 4. Defina `MONGODB_URI` (veja `.env.example`) e rode `python tela.py`.
 5. Para só conhecer o sistema sem banco: `python demo.py` (usa dados de exemplo em memória).
 6. Para conferir a instalação: `python -m unittest discover tests`.
+7. No Windows, o jeito mais rápido de ver o sistema: dê dois cliques em `iniciar_demo.bat` (cria o ambiente,
+   instala tudo e abre a demonstração). No VS Code: abra a pasta, instale a extensão *Python* quando ele sugerir
+   e aperte **F5** em *Sistema com janelas - demo*; os testes aparecem na aba *Testing*.
 
 Chaves e senhas (`MONGODB_URI`, `API_SECRET`, chaves de IA) nunca vão no código nem no ZIP: leve-as
 separadamente, por um canal seguro, e defina-as como variáveis de ambiente no novo computador.
