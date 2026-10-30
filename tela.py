@@ -104,14 +104,16 @@ def linha_nota(d):
             fmt(d.get("avc")), fmt(media_da_nota(d)))
 
 
-def criar_tabela(pai, colunas, larguras=None):
-    """Cria um Treeview com barra de rolagem e devolve o Treeview."""
+def criar_tabela(pai, colunas, larguras=None, alinhamentos=None):
+    """Cria um Treeview com barra de rolagem e devolve o Treeview.
+
+    Por padrão a 1ª coluna fica à esquerda e as demais centralizadas; `alinhamentos` troca isso."""
     quadro = ttk.Frame(pai)
     quadro.pack(fill="both", expand=True, pady=6)
     tabela = ttk.Treeview(quadro, columns=colunas, show="headings", height=8)
     tabela.tag_configure("fraca", foreground=PERIGO)
     for i, col in enumerate(colunas):
-        alinhamento = "w" if i == 0 else "center"
+        alinhamento = alinhamentos[i] if alinhamentos else ("w" if i == 0 else "center")
         tabela.heading(col, text=col, anchor=alinhamento)
         tabela.column(col, width=(larguras[i] if larguras else 120), anchor=alinhamento)
     barra = ttk.Scrollbar(quadro, orient="vertical", command=tabela.yview)
@@ -126,6 +128,33 @@ def preencher(tabela, linhas, iids=None, tags=None):
     tabela.delete(*tabela.get_children())
     for i, linha in enumerate(linhas):
         tabela.insert("", "end", iid=iids[i] if iids else None, values=linha, tags=tags[i] if tags else ())
+
+
+def texto_leitura(pai, **opcoes):
+    """Caixa de texto só para leitura, no visual da interface."""
+    return tk.Text(pai, wrap="word", state="disabled", relief="flat", background=CARTAO, foreground=TEXTO,
+                   padx=10, pady=8, highlightthickness=1, highlightbackground=BORDA,
+                   font=("Segoe UI", 10), **opcoes)
+
+
+def escrever_texto(caixa, texto):
+    caixa.config(state="normal")
+    caixa.delete("1.0", "end")
+    caixa.insert("1.0", texto)
+    caixa.config(state="disabled")
+
+
+def resumir(texto, limite):
+    """Corta o texto no limite e deixa claro que foi cortado ("…")."""
+    return texto if len(texto) <= limite else texto[:limite - 1].rstrip() + "…"
+
+
+def resumo_motivos(motivos):
+    """Primeiro motivo (cortado com "…" se longo) e quantos outros há: "Média geral baixa (5.8)  (+2)"."""
+    if not motivos:
+        return ""
+    extra = f"  (+{len(motivos) - 1})" if len(motivos) > 1 else ""
+    return resumir(motivos[0], 46) + extra
 
 
 def limpar_campos(*entradas):
@@ -247,18 +276,13 @@ class JanelaResumo(tk.Toplevel):
         self.bt_gerar.pack(side="left")
         self.carregando = Carregando(linha, "Gerando resumo com IA")
         self.carregando.pack(side="left", padx=12)
-        self.texto = tk.Text(corpo, wrap="word", state="disabled", relief="flat", background=CARTAO,
-                             foreground=TEXTO, padx=10, pady=8, highlightthickness=1,
-                             highlightbackground=BORDA, font=("Segoe UI", 10))
+        self.texto = texto_leitura(corpo)
         self.texto.pack(fill="both", expand=True, pady=(8, 0))
         self.protocol("WM_DELETE_WINDOW", self.fechar)
         self.gerar()
 
     def mostrar(self, texto):
-        self.texto.config(state="normal")
-        self.texto.delete("1.0", "end")
-        self.texto.insert("1.0", texto)
-        self.texto.config(state="disabled")
+        escrever_texto(self.texto, texto)
 
     def gerar(self):
         if self.em_andamento:
@@ -1258,7 +1282,7 @@ class App(tk.Tk):
         self.lbl_rank_aviso = ttk.Label(f, text="", foreground=MUDO)
         self.lbl_rank_aviso.pack(anchor="w", pady=(6, 0))
         self.tab_rank = criar_tabela(f, ("Posição", "Turma", "Alunos", "Notas", "Média geral"),
-                                     (80, 300, 100, 100, 130))
+                                     (80, 300, 100, 100, 130), alinhamentos=("center",) * 5)
         ttk.Label(f, text="Média da turma = média das médias (duas maiores provas) de todas as notas lançadas.",
                   foreground=MUDO).pack(anchor="w")
 
@@ -1288,16 +1312,32 @@ class App(tk.Tk):
         self.lbl_risco_resumo.pack(side="left", padx=14)
         self.risco_por_iid = {}
         self.risco_lista = []
-        self.tab_risco = criar_tabela(
-            f, ("Aluno", "Turma", "Média", "Risco", "Pontos", "Motivos"),
-            (190, 90, 70, 80, 60, 520))
-        self.tab_risco.column("Motivos", anchor="w")
-        for nivel, cor in (("alto", "#f8d7da"), ("médio", "#fff3cd"), ("baixo", "#d9f0de")):
-            self.tab_risco.tag_configure(nivel, background=cor)
+        # rodapé e detalhe empacotados antes da tabela para nunca ficarem cortados
         ttk.Label(f, text=("Modelo explicável: soma pontos por média baixa, disciplinas abaixo de 6, "
                            "queda entre semestres e dados incompletos. Baixo < 25, médio 25-49, alto ≥ 50. "
                            "É um alerta para apoiar a decisão, não um veredito."),
-                  foreground=MUDO, wraplength=940, justify="left").pack(anchor="w")
+                  foreground=MUDO, wraplength=940, justify="left").pack(side="bottom", anchor="w")
+        detalhe = ttk.LabelFrame(f, text="Detalhes do alerta", padding=6)
+        detalhe.pack(side="bottom", fill="x", pady=(6, 6))
+        self.txt_risco = texto_leitura(detalhe, height=5)
+        self.txt_risco.pack(fill="x")
+        self.tab_risco = criar_tabela(
+            f, ("Aluno", "Turma", "Média", "Risco", "Pontos", "Motivos"),
+            (170, 80, 70, 80, 70, 470))
+        self.tab_risco.column("Motivos", anchor="w")
+        for nivel, cor in (("alto", "#f8d7da"), ("médio", "#fff3cd"), ("baixo", "#d9f0de")):
+            self.tab_risco.tag_configure(nivel, background=cor)
+        self.tab_risco.bind("<<TreeviewSelect>>", self.mostrar_detalhe_risco)
+        self.mostrar_detalhe_risco()
+
+    def mostrar_detalhe_risco(self, _evento=None):
+        """Todos os motivos do aluno selecionado (a coluna da tabela mostra só o começo)."""
+        r = self.selecionado(self.tab_risco, self.risco_por_iid)
+        if not r:
+            return escrever_texto(self.txt_risco,
+                                  "Selecione um aluno na tabela para ver todos os motivos do alerta.")
+        cabecalho = f"{r['nome']} ({r['turma']}): risco {r['nivel']}, {r['pontos']} ponto(s)"
+        escrever_texto(self.txt_risco, cabecalho + "\n" + "\n".join(f"• {m}" for m in r["motivos"]))
 
     def gerar_risco(self):
         try:
@@ -1312,11 +1352,19 @@ class App(tk.Tk):
         """Preenche a tabela de risco, filtrando pela turma escolhida (a lista completa fica guardada)."""
         turma = self.cb_risco_turma.get()
         visiveis = [r for r in self.risco_lista if turma in (TODAS_TURMAS, r["turma"])]
+        anterior = self.tab_risco.selection()
         self.tab_risco.delete(*self.tab_risco.get_children())
         for r in visiveis:
             self.tab_risco.insert("", "end", iid=str(r["aluno_id"]), tags=(r["nivel"],), values=(
                 r["nome"], r["turma"], fmt(r["media"]), r["nivel"].capitalize(),
-                r["pontos"], " ".join(r["motivos"])))
+                r["pontos"], resumo_motivos(r["motivos"])))
+        # mantém o aluno selecionado; se não havia (ou saiu do filtro), seleciona o de maior risco
+        alvo = anterior[0] if anterior and self.tab_risco.exists(anterior[0]) else (
+            str(visiveis[0]["aluno_id"]) if visiveis else None)
+        if alvo:
+            self.tab_risco.selection_set(alvo)
+            self.tab_risco.see(alvo)
+        self.mostrar_detalhe_risco()
         altos = sum(r["nivel"] == "alto" for r in visiveis)
         medios = sum(r["nivel"] == "médio" for r in visiveis)
         escopo = "" if turma == TODAS_TURMAS else f" ({turma})"

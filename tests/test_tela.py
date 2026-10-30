@@ -122,5 +122,49 @@ class TestCoresEResumo(unittest.TestCase):
         self.assertFalse(janela.winfo_exists())
 
 
+@unittest.skipUnless(TEM_TELA, "sem Tkinter ou sem tela disponível")
+class TestAlertaDeRisco(unittest.TestCase):
+    def setUp(self):
+        import demo
+        self.app = tela.App(demo.montar_banco(), "ana", autenticacao.PERFIL_ADMIN)
+        self.addCleanup(self.app.destroy)
+        self.app.update()
+
+    def test_aluno_de_maior_risco_ja_vem_selecionado_com_todos_os_motivos(self):
+        self.app.gerar_risco()
+        self.app.update()
+        r = self.app.risco_lista[0]  # a lista vem do maior para o menor risco
+        self.assertEqual(self.app.tab_risco.selection(), (str(r["aluno_id"]),))
+        detalhe = self.app.txt_risco.get("1.0", "end")
+        self.assertIn(r["nome"], detalhe)
+        for motivo in r["motivos"]:
+            self.assertIn(motivo, detalhe)  # nada fica cortado no detalhe
+
+    def test_texto_longo_na_tabela_termina_com_reticencias(self):
+        self.assertEqual(tela.resumir("abc", 10), "abc")
+        curto = tela.resumir("palavra " * 30, 20)
+        self.assertEqual(len(curto), 20)
+        self.assertTrue(curto.endswith("…"))
+
+    def test_resumo_dos_motivos_mostra_o_primeiro_e_quantos_faltam(self):
+        self.assertEqual(tela.resumo_motivos([]), "")
+        self.assertEqual(tela.resumo_motivos(["Sem sinais de risco."]), "Sem sinais de risco.")
+        r = tela.resumo_motivos(["Média geral próxima do limite (6.52).", "Média abaixo de 6 em: Informática.",
+                                 "Queda forte (-3.80)."])
+        self.assertEqual(r, "Média geral próxima do limite (6.52).  (+2)")
+        self.assertTrue(tela.resumo_motivos(["x" * 200, "y"]).endswith("…  (+1)"))
+
+    def test_escolher_outro_aluno_troca_o_detalhe(self):
+        self.app.gerar_risco()
+        self.app.update()
+        outro = self.app.risco_lista[-1]
+        self.app.tab_risco.selection_set(str(outro["aluno_id"]))
+        self.app.update()
+        self.assertIn(outro["nome"], self.app.txt_risco.get("1.0", "end"))
+
+    def test_posicao_do_ranking_fica_centralizada(self):
+        self.assertEqual(str(self.app.tab_rank.column("Posição", "anchor")), "center")
+
+
 if __name__ == "__main__":
     unittest.main()
