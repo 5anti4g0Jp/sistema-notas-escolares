@@ -57,7 +57,10 @@ python api.py             # banco real (precisa de MONGODB_URI)
 
 Abra http://127.0.0.1:8000/docs para ver e testar as rotas. Primeiro `POST /primeiro-acesso`
 (cria o administrador), depois `POST /login` (devolve o token) e use o botão **Authorize** do `/docs`.
-Os perfis são administrador, professor e consulta.
+Os perfis são administrador, professor e consulta. O **professor** só vê *Lançar notas* e as consultas
+(Boletim com gráfico e resumo por IA, Ranking de turmas e Alerta de risco): as abas de cadastros, professores,
+alocações e usuários nem aparecem para ele, e no terminal ele também não lista alunos. Quem cria a conta de
+professor é o administrador, na aba *Usuários*.
 
 ## Regras
 - Nota por aluno + disciplina + semestre (1 a 4), com provas AVG, AVI e AVC (0 a 10).

@@ -1,7 +1,7 @@
 """API REST do sistema de notas escolares (FastAPI).
 
 Reaproveita as mesmas regras (calculos.py, risco.py) e os mesmos perfis da tela:
-administrador (tudo), professor (vê tudo e lança notas) e consulta (só visualiza).
+administrador (tudo), professor (lança notas e faz consultas) e consulta (só visualiza).
 
 Executar (precisa de MONGODB_URI):   python api.py
 Sem banco real, com dados de exemplo: python api.py --demo      (precisa de mongomock)

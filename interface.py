@@ -68,7 +68,8 @@ def fazer_login(banco):
 # Quem pode usar cada opção do menu (as demais valem para todos os perfis).
 _ADMIN = (autenticacao.PERFIL_ADMIN,)
 _ADMIN_E_PROFESSOR = (autenticacao.PERFIL_ADMIN, autenticacao.PERFIL_PROFESSOR)
-PERMISSOES = {"1": _ADMIN, "2": _ADMIN, "3": _ADMIN_E_PROFESSOR}
+_SEM_PROFESSOR = (autenticacao.PERFIL_ADMIN, autenticacao.PERFIL_CONSULTA)  # lista de alunos: o professor não vê
+PERMISSOES = {"1": _ADMIN, "2": _ADMIN, "3": _ADMIN_E_PROFESSOR, "4": _SEM_PROFESSOR}
 OPCOES = (
     ("1", "Cadastrar aluno"), ("2", "Cadastrar disciplina"), ("3", "Lançar ou editar notas"),
     ("4", "Listar alunos"), ("5", "Relatório de aluno"), ("6", "Ranking de turmas"),

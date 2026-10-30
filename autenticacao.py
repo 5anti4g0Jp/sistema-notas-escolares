@@ -23,7 +23,7 @@ BLOQUEIO_MINUTOS = 5
 
 # Perfis: um único administrador (o 1º acesso) + até MAX_USUARIOS_EXTRAS usuários de outros perfis.
 PERFIL_ADMIN = "administrador"
-PERFIL_PROFESSOR = "professor"   # vê tudo e lança/edita notas
+PERFIL_PROFESSOR = "professor"   # só lança/edita notas e faz consultas (boletim, ranking, risco)
 PERFIL_CONSULTA = "consulta"     # só visualiza
 PERFIS_EXTRAS = (PERFIL_PROFESSOR, PERFIL_CONSULTA)
 MAX_USUARIOS_EXTRAS = 3

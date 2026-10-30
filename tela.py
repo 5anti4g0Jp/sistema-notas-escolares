@@ -24,6 +24,8 @@ from config import NOME_BANCO
 from risco import avaliar_aluno, avaliar_todos
 
 TODAS_TURMAS = "Todas as turmas"
+# O professor só lança notas e consulta; cadastros, vínculos e usuários nem aparecem para ele.
+ABAS_DO_PROFESSOR = ("Lançar notas", "Boletim", "Ranking de turmas", "Alerta de risco")
 COLUNAS_NOTAS = ("Disciplina", "Semestre", "AVG", "AVI", "AVC", "Média")
 LARGURAS_NOTAS = (320, 90, 90, 90, 90, 100)
 
@@ -254,7 +256,7 @@ class App(tk.Tk):
         self.banco = banco
         self.usuario = usuario
         self.perfil = perfil
-        # administrador: tudo | professor: vê tudo e lança notas | consulta: só visualiza
+        # administrador: tudo | professor: só lança notas e consulta | consulta: só visualiza
         self.eh_admin = perfil == autenticacao.PERFIL_ADMIN
         self.pode_lancar = perfil in (autenticacao.PERFIL_ADMIN, autenticacao.PERFIL_PROFESSOR)
         self.frames_abas = {}
@@ -297,6 +299,11 @@ class App(tk.Tk):
                 botao.config(state="disabled")
         if not self.pode_lancar:
             self.abas.hide(self.frames_abas["Lançar notas"])
+        if perfil == autenticacao.PERFIL_PROFESSOR:
+            for titulo, quadro in self.frames_abas.items():
+                if titulo not in ABAS_DO_PROFESSOR:
+                    self.abas.hide(quadro)
+            self.abas.select(self.frames_abas["Lançar notas"])
         self.abas.bind("<<NotebookTabChanged>>", self.ao_trocar_aba)
         self.carregar_dados()
         if self.eh_admin:
@@ -1230,8 +1237,8 @@ class App(tk.Tk):
         self.lbl_limite_usuarios.pack(anchor="w", pady=(4, 0))
         self.tab_usuarios = criar_tabela(f, ("Usuário", "Perfil", "Criado em"), (260, 160, 200))
         ttk.Label(f, text=("Administrador: tudo, inclusive gerenciar usuários (só existe um, e ele não pode ser "
-                           "excluído).\nProfessor: vê tudo e lança/edita notas; não cadastra nem exclui alunos e "
-                           "disciplinas.\nConsulta: apenas visualiza. Para trocar a senha, escolha o usuário na "
+                           "excluído).\nProfessor: só lança/edita notas e faz consultas (boletim, gráfico, resumo por IA, "
+                           "ranking e alerta de risco); não vê cadastros nem usuários.\nConsulta: apenas visualiza. Para trocar a senha, escolha o usuário na "
                            "tabela e digite a nova senha no campo Senha."),
                   foreground="#555555", justify="left").pack(anchor="w")
 
