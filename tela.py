@@ -675,9 +675,7 @@ class App(tk.Tk):
         topo = ttk.Frame(f)
         topo.pack(fill="x")
         self.cb_rel_aluno = self.combo(topo, "Aluno:", 0, self.combos_alunos)
-        ttk.Button(topo, text="Gerar relatório", command=self.gerar_relatorio).grid(
-            row=0, column=2, padx=8)
-        ttk.Button(topo, text="Ver gráfico", command=self.abrir_grafico).grid(row=0, column=3)
+        ttk.Button(topo, text="Ver gráfico", command=self.abrir_grafico).grid(row=0, column=2, padx=8)
         self.lbl_rel = self.quadro_dados_aluno(f)
         self.lbl_rel_aviso = ttk.Label(f, text="Selecione um aluno para ver as notas.", foreground="#555555")
         self.lbl_rel_aviso.pack(anchor="w")
@@ -732,8 +730,6 @@ class App(tk.Tk):
         topo = ttk.Frame(f)
         topo.pack(fill="x")
         self.cb_bol_aluno = self.combo(topo, "Aluno:", 0, self.combos_alunos)
-        ttk.Button(topo, text="Ver boletim", command=self.gerar_boletim).grid(
-            row=0, column=2, padx=8)
         self.lbl_bol = self.quadro_dados_aluno(f)
         self.lbl_bol_aviso = ttk.Label(f, text="Selecione um aluno para ver o boletim.", foreground="#555555")
         self.lbl_bol_aviso.pack(anchor="w")
@@ -790,7 +786,6 @@ class App(tk.Tk):
     # ---------- ranking de turmas ----------
     def montar_aba_ranking(self):
         f = self.aba("Ranking de turmas")
-        ttk.Button(f, text="Atualizar ranking", command=self.gerar_ranking).pack(anchor="w")
         self.lbl_rank_aviso = ttk.Label(f, text="", foreground="#555555")
         self.lbl_rank_aviso.pack(anchor="w", pady=(6, 0))
         self.tab_rank = criar_tabela(f, ("Posição", "Turma", "Alunos", "Notas", "Média geral"),
@@ -814,8 +809,7 @@ class App(tk.Tk):
         f = self.aba("Alerta de risco")
         topo = ttk.Frame(f)
         topo.pack(fill="x")
-        ttk.Button(topo, text="Atualizar análise", command=self.gerar_risco).pack(side="left")
-        ttk.Label(topo, text="Turma:").pack(side="left", padx=(14, 4))
+        ttk.Label(topo, text="Turma:").pack(side="left", padx=(0, 4))
         self.cb_risco_turma = ttk.Combobox(topo, state="readonly", width=20, values=[TODAS_TURMAS])
         self.cb_risco_turma.set(TODAS_TURMAS)
         self.cb_risco_turma.pack(side="left")
