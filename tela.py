@@ -13,6 +13,7 @@ from tkinter import messagebox, ttk
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
 import autenticacao
+import professores
 from banco import conectar_banco
 from calculos import (PROVAS, SEMESTRES, calcular_media, fmt, ler_nota_opcional,
                       media_da_nota, medias_por_disciplina, montar_boletim,
@@ -174,6 +175,12 @@ class App(tk.Tk):
         self.disciplinas_por_iid = {}
         self.combos_alunos = []
         self.combos_disciplinas = []
+        self.opcoes_nota = {}
+        self.mapa_aloc_disc = {}
+        self.mapa_professores = {}
+        self.professores_por_iid = {}
+        self.alocacoes_por_iid = {}
+        self.lista_disciplinas = []
 
         self.title("Sistema de Notas Escolares")
         self.geometry("1000x720")
@@ -188,8 +195,9 @@ class App(tk.Tk):
         self.abas.pack(fill="both", expand=True, padx=8, pady=8)
         self.montar_aba_alunos()
         self.montar_aba_disciplinas()
+        self.montar_aba_professores()
+        self.montar_aba_alocacoes()
         self.montar_aba_notas()
-        self.montar_aba_relatorio()
         self.montar_aba_boletim()
         self.montar_aba_ranking()
         self.montar_aba_risco()
@@ -256,6 +264,8 @@ class App(tk.Tk):
         try:
             alunos = list(self.banco.alunos.find().sort("nome", 1))
             disciplinas = list(self.banco.disciplinas.find().sort("nome", 1))
+            docentes = list(self.banco.professores.find().sort("nome", 1))
+            alocacoes = professores.listar_alocacoes(self.banco)
         except PyMongoError as erro:
             return self.erro_banco(erro)
         self.mapa_alunos = {f"{a['matricula']} - {a['nome']}": a for a in alunos}
@@ -273,6 +283,8 @@ class App(tk.Tk):
         self.atualizar_tabela_alunos()
         preencher(self.tab_disc, [(d["nome"], d["codigo"], d["carga_horaria"]) for d in disciplinas],
                   [str(d["_id"]) for d in disciplinas])
+        self.mostrar_professores(disciplinas, docentes, alocacoes)
+        self.atualizar_opcoes_disciplina()
 
     def ao_trocar_aba(self, _evento=None):
         aba = self.abas.tab(self.abas.select(), "text")
@@ -339,6 +351,9 @@ class App(tk.Tk):
             cb["values"] = valores
             if cb.get() not in valores:  # a turma escolhida deixou de existir
                 cb.set(TODAS_TURMAS)
+        self.cb_aloc_turma["values"] = turmas
+        if self.cb_aloc_turma.get() not in turmas:
+            self.cb_aloc_turma.set("")
 
     def atualizar_tabela_alunos(self):
         """Mostra os alunos agrupados por turma, respeitando o filtro de turma e a busca."""
@@ -542,10 +557,188 @@ class App(tk.Tk):
                     "Isso não pode ser desfeito."):
                 return
             self.banco.notas.delete_many({"disciplina_id": disciplina["_id"]})
+            professores.remover_disciplina_dos_professores(self.banco, disciplina["_id"])
             self.banco.disciplinas.delete_one({"_id": disciplina["_id"]})
         except PyMongoError as erro:
             return self.erro_banco(erro)
         self.limpar_disciplina()
+        self.carregar_dados()
+
+    # ---------- professores (o que cada um pode lecionar) ----------
+    def montar_aba_professores(self):
+        f = self.aba("Professores")
+        form = ttk.Frame(f)
+        form.pack(fill="x")
+        self.e_pnome = self.campo(form, "Nome do professor:", 0)
+        ttk.Label(form, text="Pode lecionar:").grid(row=1, column=0, sticky="nw", pady=3)
+        self.lb_habilitadas = tk.Listbox(form, selectmode="multiple", exportselection=False,
+                                         height=5, width=44)
+        self.lb_habilitadas.grid(row=1, column=1, sticky="w", padx=8, pady=3)
+        self.botoes_crud(form, 2, "Cadastrar professor", self.cadastrar_professor,
+                         self.salvar_professor, self.excluir_professor, self.limpar_professor)
+        ttk.Label(f, text="Marque as disciplinas que o professor pode dar. Um professor só pode ser "
+                          "alocado em disciplinas marcadas aqui.", foreground="#555555").pack(anchor="w")
+        self.tab_prof = criar_tabela(f, ("Professor", "Pode lecionar"), (260, 600))
+        self.tab_prof.bind("<<TreeviewSelect>>", self.ao_selecionar_professor)
+
+    def disciplinas_marcadas(self):
+        return [self.lista_disciplinas[i]["_id"] for i in self.lb_habilitadas.curselection()]
+
+    def limpar_professor(self):
+        limpar_campos(self.e_pnome)
+        self.lb_habilitadas.selection_clear(0, "end")
+        self.tab_prof.selection_set(())
+
+    def ao_selecionar_professor(self, _evento=None):
+        docente = self.selecionado(self.tab_prof, self.professores_por_iid)
+        if not docente:
+            return
+        limpar_campos(self.e_pnome)
+        self.e_pnome.insert(0, docente["nome"])
+        self.lb_habilitadas.selection_clear(0, "end")
+        for i, d in enumerate(self.lista_disciplinas):
+            if d["_id"] in docente.get("disciplinas", []):
+                self.lb_habilitadas.selection_set(i)
+
+    def cadastrar_professor(self):
+        if not self.exigir(self.eh_admin, "cadastrar professores"):
+            return
+        try:
+            professores.criar_professor(self.banco, self.e_pnome.get(), self.disciplinas_marcadas())
+        except professores.RegraError as erro:
+            return messagebox.showwarning("Atenção", str(erro))
+        except DuplicateKeyError:
+            return messagebox.showerror("Erro", "Já existe um professor com esse nome.")
+        except PyMongoError as erro:
+            return self.erro_banco(erro)
+        self.limpar_professor()
+        self.carregar_dados()
+        messagebox.showinfo("Sucesso", "Professor cadastrado.")
+
+    def salvar_professor(self):
+        if not self.exigir(self.eh_admin, "alterar professores"):
+            return
+        docente = self.selecionado(self.tab_prof, self.professores_por_iid)
+        if not docente:
+            return messagebox.showwarning("Atenção", "Selecione um professor na tabela.")
+        try:
+            professores.atualizar_professor(self.banco, docente["_id"], self.e_pnome.get(),
+                                            self.disciplinas_marcadas())
+        except professores.RegraError as erro:
+            return messagebox.showwarning("Atenção", str(erro))
+        except DuplicateKeyError:
+            return messagebox.showerror("Erro", "Já existe um professor com esse nome.")
+        except PyMongoError as erro:
+            return self.erro_banco(erro)
+        self.limpar_professor()
+        self.carregar_dados()
+        messagebox.showinfo("Sucesso", "Professor atualizado.")
+
+    def excluir_professor(self):
+        if not self.exigir(self.eh_admin, "excluir professores"):
+            return
+        docente = self.selecionado(self.tab_prof, self.professores_por_iid)
+        if not docente:
+            return messagebox.showwarning("Atenção", "Selecione um professor na tabela.")
+        if not messagebox.askyesno("Confirmar exclusão",
+                                   f"Excluir {docente['nome']} e as alocações dele? Isso não pode ser desfeito."):
+            return
+        try:
+            professores.excluir_professor(self.banco, docente["_id"])
+        except professores.RegraError as erro:
+            return messagebox.showwarning("Não permitido", str(erro))
+        except PyMongoError as erro:
+            return self.erro_banco(erro)
+        self.limpar_professor()
+        self.carregar_dados()
+
+    # ---------- alocações: professor, disciplina, ano e turma ----------
+    def montar_aba_alocacoes(self):
+        f = self.aba("Alocações")
+        form = ttk.Frame(f)
+        form.pack(fill="x")
+        self.cb_aloc_prof = self.combo(form, "Professor:", 0, [])
+        self.cb_aloc_disc = self.combo(form, "Disciplina:", 1, [])
+        ttk.Label(form, text="Ano:").grid(row=2, column=0, sticky="w", pady=3)
+        self.sp_aloc_ano = ttk.Spinbox(form, from_=2000, to=2100, width=8)
+        self.sp_aloc_ano.set(datetime.now().year)
+        self.sp_aloc_ano.grid(row=2, column=1, sticky="w", padx=8, pady=3)
+        self.cb_aloc_turma = self.combo(form, "Turma:", 3, [])
+        self.cb_aloc_prof.bind("<<ComboboxSelected>>", lambda e: self.atualizar_disciplinas_alocacao())
+
+        botoes = ttk.Frame(form)
+        botoes.grid(row=4, column=1, sticky="w", padx=8, pady=8)
+        b_vincular = ttk.Button(botoes, text="Vincular", command=self.vincular_alocacao)
+        b_remover = ttk.Button(botoes, text="Remover vínculo", command=self.remover_alocacao)
+        b_vincular.pack(side="left")
+        b_remover.pack(side="left", padx=6)
+        self.botoes_cadastro += [b_vincular, b_remover]
+        ttk.Label(f, text=("O mesmo professor pode ter várias turmas; a mesma turma pode ter a mesma "
+                           "disciplina com professores diferentes."),
+                  foreground="#555555").pack(anchor="w")
+        self.tab_aloc = criar_tabela(f, ("Professor", "Disciplina", "Ano", "Turma"), (260, 300, 80, 200))
+
+    def mostrar_professores(self, disciplinas, docentes, alocacoes):
+        """Atualiza a lista de habilitações, as tabelas e as caixas de professor/disciplina."""
+        self.lista_disciplinas = disciplinas
+        self.lb_habilitadas.delete(0, "end")
+        for d in disciplinas:
+            self.lb_habilitadas.insert("end", d["nome"])
+        nomes = {d["_id"]: d["nome"] for d in disciplinas}
+        self.professores_por_iid = {str(p["_id"]): p for p in docentes}
+        self.mapa_professores = {p["nome"]: p for p in docentes}
+        preencher(self.tab_prof,
+                  [(p["nome"], ", ".join(nomes[i] for i in p.get("disciplinas", []) if i in nomes))
+                   for p in docentes],
+                  [str(p["_id"]) for p in docentes])
+        self.alocacoes_por_iid = {str(a["_id"]): a for a in alocacoes}
+        preencher(self.tab_aloc, [(a["professor"], a["disciplina"], a["ano"], a["turma"]) for a in alocacoes],
+                  [str(a["_id"]) for a in alocacoes])
+        self.cb_aloc_prof["values"] = list(self.mapa_professores)
+        if self.cb_aloc_prof.get() not in self.mapa_professores:
+            self.cb_aloc_prof.set("")
+        self.atualizar_disciplinas_alocacao()
+
+    def atualizar_disciplinas_alocacao(self):
+        """Só oferece as disciplinas para as quais o professor escolhido está habilitado."""
+        docente = self.mapa_professores.get(self.cb_aloc_prof.get())
+        habilitadas = docente.get("disciplinas", []) if docente else []
+        self.mapa_aloc_disc = {d["nome"]: d for d in self.lista_disciplinas if d["_id"] in habilitadas}
+        self.cb_aloc_disc["values"] = list(self.mapa_aloc_disc)
+        if self.cb_aloc_disc.get() not in self.mapa_aloc_disc:
+            self.cb_aloc_disc.set("")
+
+    def vincular_alocacao(self):
+        if not self.exigir(self.eh_admin, "alocar professores"):
+            return
+        docente = self.mapa_professores.get(self.cb_aloc_prof.get())
+        disciplina = self.mapa_aloc_disc.get(self.cb_aloc_disc.get())
+        if not docente or not disciplina:
+            return messagebox.showwarning("Atenção", "Selecione o professor e a disciplina.")
+        try:
+            ano = int(self.sp_aloc_ano.get())
+        except ValueError:
+            return messagebox.showwarning("Atenção", "Informe um ano válido (ex.: 2026).")
+        try:
+            professores.alocar(self.banco, docente["_id"], disciplina["_id"], ano, self.cb_aloc_turma.get())
+        except professores.RegraError as erro:
+            return messagebox.showwarning("Regra de negócio", str(erro))
+        except DuplicateKeyError:
+            return messagebox.showwarning("Atenção", "Esse vínculo já existe.")
+        except PyMongoError as erro:
+            return self.erro_banco(erro)
+        self.carregar_dados()
+
+    def remover_alocacao(self):
+        if not self.exigir(self.eh_admin, "remover alocações"):
+            return
+        aloc = self.selecionado(self.tab_aloc, self.alocacoes_por_iid)
+        if not aloc:
+            return messagebox.showwarning("Atenção", "Selecione um vínculo na tabela.")
+        try:
+            professores.remover_alocacao(self.banco, aloc["_id"])
+        except PyMongoError as erro:
+            return self.erro_banco(erro)
         self.carregar_dados()
 
     # ---------- lançar notas (AVG, AVI e AVC por disciplina e semestre) ----------
@@ -554,7 +747,7 @@ class App(tk.Tk):
         form = ttk.Frame(f)
         form.pack(fill="x")
         self.cb_nota_aluno = self.combo(form, "Aluno:", 0, self.combos_alunos)
-        self.cb_nota_disc = self.combo(form, "Disciplina:", 1, self.combos_disciplinas)
+        self.cb_nota_disc = self.combo(form, "Disciplina:", 1, [])  # opções dependem da turma do aluno
         ttk.Label(form, text="Semestre:").grid(row=2, column=0, sticky="w", pady=3)
         self.sp_semestre = ttk.Spinbox(form, from_=1, to=SEMESTRES, width=5, state="readonly",
                                        command=self.preencher_form_notas)
@@ -577,8 +770,24 @@ class App(tk.Tk):
 
         ttk.Label(f, text="Notas do aluno selecionado:").pack(anchor="w")
         self.tab_notas = criar_tabela(f, COLUNAS_NOTAS, LARGURAS_NOTAS)
-        self.cb_nota_aluno.bind("<<ComboboxSelected>>", lambda e: self.ao_mudar_selecao())
+        self.cb_nota_aluno.bind("<<ComboboxSelected>>", lambda e: self.ao_mudar_aluno())
         self.cb_nota_disc.bind("<<ComboboxSelected>>", lambda e: self.ao_mudar_selecao())
+
+    def ao_mudar_aluno(self):
+        self.atualizar_opcoes_disciplina()
+        self.ao_mudar_selecao()
+
+    def atualizar_opcoes_disciplina(self):
+        """Disciplinas (com o professor) que a turma do aluno selecionado pode receber."""
+        aluno = self.mapa_alunos.get(self.cb_nota_aluno.get())
+        try:
+            opcoes = professores.opcoes_de_lancamento(self.banco, aluno["turma"]) if aluno else []
+        except PyMongoError as erro:
+            return self.erro_banco(erro)
+        self.opcoes_nota = {rotulo: (disc, prof) for disc, prof, rotulo in opcoes}
+        self.cb_nota_disc["values"] = list(self.opcoes_nota)
+        if self.cb_nota_disc.get() not in self.opcoes_nota:
+            self.cb_nota_disc.set("")
 
     def ao_mudar_selecao(self):
         self.preencher_form_notas()
@@ -598,11 +807,11 @@ class App(tk.Tk):
         for entrada in self.e_provas.values():
             entrada.delete(0, "end")
         aluno = self.mapa_alunos.get(self.cb_nota_aluno.get())
-        disciplina = self.mapa_disciplinas.get(self.cb_nota_disc.get())
-        if aluno and disciplina:
+        opcao = self.opcoes_nota.get(self.cb_nota_disc.get())
+        if aluno and opcao:
             try:
                 existente = self.banco.notas.find_one({
-                    "aluno_id": aluno["_id"], "disciplina_id": disciplina["_id"],
+                    "aluno_id": aluno["_id"], "disciplina_id": opcao[0], "professor_id": opcao[1],
                     "semestre": int(self.sp_semestre.get())})
             except PyMongoError as erro:
                 return self.erro_banco(erro)
@@ -627,8 +836,8 @@ class App(tk.Tk):
         if not self.exigir(self.pode_lancar, "lançar notas"):
             return
         aluno = self.mapa_alunos.get(self.cb_nota_aluno.get())
-        disciplina = self.mapa_disciplinas.get(self.cb_nota_disc.get())
-        if not aluno or not disciplina:
+        opcao = self.opcoes_nota.get(self.cb_nota_disc.get())
+        if not aluno or not opcao:
             return messagebox.showwarning("Atenção", "Selecione o aluno e a disciplina.")
         try:
             notas = {nome.lower(): ler_nota_opcional(e.get()) for nome, e in self.e_provas.items()}
@@ -637,7 +846,7 @@ class App(tk.Tk):
                 "Atenção", "As notas devem ser números entre 0 e 10 (ou ficar em branco).")
         if all(v is None for v in notas.values()):
             return messagebox.showwarning("Atenção", "Informe pelo menos uma nota.")
-        filtro = {"aluno_id": aluno["_id"], "disciplina_id": disciplina["_id"],
+        filtro = {"aluno_id": aluno["_id"], "disciplina_id": opcao[0], "professor_id": opcao[1],
                   "semestre": int(self.sp_semestre.get())}
         documento = {**filtro, **notas, "data_lancamento": datetime.now(timezone.utc)}
         try:
@@ -669,37 +878,10 @@ class App(tk.Tk):
         for chave, rotulo in rotulos.items():
             rotulo.config(text=aluno[chave] if aluno else "-")
 
-    # ---------- relatório do aluno ----------
-    def montar_aba_relatorio(self):
-        f = self.aba("Relatório do aluno")
-        topo = ttk.Frame(f)
-        topo.pack(fill="x")
-        self.cb_rel_aluno = self.combo(topo, "Aluno:", 0, self.combos_alunos)
-        ttk.Button(topo, text="Ver gráfico", command=self.abrir_grafico).grid(row=0, column=2, padx=8)
-        self.lbl_rel = self.quadro_dados_aluno(f)
-        self.lbl_rel_aviso = ttk.Label(f, text="Selecione um aluno para ver as notas.", foreground="#555555")
-        self.lbl_rel_aviso.pack(anchor="w")
-        # rodapé empacotado antes da tabela para nunca ficar cortado
-        ttk.Label(f, text="Média = soma das duas maiores notas (AVG, AVI, AVC) dividida por 2.",
-                  foreground="#555555").pack(side="bottom", anchor="w")
-        self.tab_rel = criar_tabela(f, COLUNAS_NOTAS, LARGURAS_NOTAS)
-        self.cb_rel_aluno.bind("<<ComboboxSelected>>", lambda e: self.gerar_relatorio())
-
-    def gerar_relatorio(self):
-        aluno = self.mapa_alunos.get(self.cb_rel_aluno.get())
-        if not aluno:
-            return messagebox.showwarning("Atenção", "Selecione um aluno.")
-        try:
-            dados = notas_do_aluno(self.banco, aluno["_id"])
-        except PyMongoError as erro:
-            return self.erro_banco(erro)
-        self.mostrar_dados_aluno(self.lbl_rel, aluno)
-        preencher(self.tab_rel, [linha_nota(d) for d in dados])
-        self.lbl_rel_aviso.config(text="" if dados else "Esse aluno ainda não possui notas.")
-
+    # ---------- gráfico do aluno ----------
     def abrir_grafico(self):
         """Abre uma janela com o gráfico de médias por disciplina do aluno selecionado."""
-        aluno = self.mapa_alunos.get(self.cb_rel_aluno.get())
+        aluno = self.mapa_alunos.get(self.cb_bol_aluno.get())
         if not aluno:
             return messagebox.showwarning("Atenção", "Selecione um aluno.")
         try:
@@ -730,6 +912,7 @@ class App(tk.Tk):
         topo = ttk.Frame(f)
         topo.pack(fill="x")
         self.cb_bol_aluno = self.combo(topo, "Aluno:", 0, self.combos_alunos)
+        ttk.Button(topo, text="Ver gráfico", command=self.abrir_grafico).grid(row=0, column=2, padx=8)
         self.lbl_bol = self.quadro_dados_aluno(f)
         self.lbl_bol_aviso = ttk.Label(f, text="Selecione um aluno para ver o boletim.", foreground="#555555")
         self.lbl_bol_aviso.pack(anchor="w")

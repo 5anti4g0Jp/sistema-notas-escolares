@@ -45,6 +45,11 @@ Os perfis são administrador, professor e consulta.
   (<7, <6, <5), disciplinas com média <6, queda ≥1 ponto entre os dois últimos semestres e dados
   incompletos. Baixo <25, médio 25-49, alto ≥50. Não é aprendizado de máquina treinado (o banco
   não guarda aprovação/reprovação).
+- Professores e alocações (`professores.py`): cada professor tem uma lista de disciplinas que pode
+  lecionar e só pode ser alocado (professor + disciplina + ano + turma) nelas. O mesmo professor pode
+  ter várias turmas e a mesma turma pode ter a mesma disciplina com professores diferentes. A nota
+  fica ligada ao professor e aparece como "Disciplina - Prof. Nome". Turmas sem alocação continuam
+  lançando por disciplina, como antes.
 - Senha do administrador: mínimo 8 caracteres, com letras e números.
 - 5 tentativas inválidas bloqueiam o usuário por 5 minutos (registrado no banco).
 - Excluir aluno ou disciplina (só na tela) apaga também as notas ligadas a ele.
@@ -52,6 +57,7 @@ Os perfis são administrador, professor e consulta.
 ## Arquivos
 - `calculos.py` – regras de média, boletim e ranking (usado pelas duas interfaces)
 - `autenticacao.py`, `banco.py`, `config.py` – login, conexão e índices
+- `professores.py` – professores, habilitações e alocações
 - `risco.py` – alerta de risco acadêmico
 - `tela.py` – interface gráfica
 - `main.py`, `interface.py`, `cadastros.py`, `notas.py`, `consultas.py`, `relatorios.py`, `entrada.py` – terminal

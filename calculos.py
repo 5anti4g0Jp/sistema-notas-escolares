@@ -1,8 +1,10 @@
 """Regras de negócio compartilhadas pela tela e pelo terminal.
 
-Cada nota é um documento por aluno + disciplina + semestre, com as provas
+Cada nota é um documento por aluno + disciplina + semestre (+ professor), com as provas
 AVG, AVI e AVC (campos "avg", "avi", "avc"; vazio = não lançada).
 """
+
+from professores import rotulo_disciplina
 
 SEMESTRES = 4  # curso de 2 anos = 4 semestres
 PROVAS = ("AVG", "AVI", "AVC")
@@ -50,11 +52,16 @@ def notas_do_aluno(banco, aluno_id):
         {"$lookup": {"from": "disciplinas", "localField": "disciplina_id",
                      "foreignField": "_id", "as": "disciplina"}},
         {"$unwind": "$disciplina"},
-        {"$project": {"_id": 0, "disciplina": "$disciplina.nome", "semestre": 1,
-                      "avg": 1, "avi": 1, "avc": 1}},
-        {"$sort": {"disciplina": 1, "semestre": 1}},
+        {"$lookup": {"from": "professores", "localField": "professor_id",
+                     "foreignField": "_id", "as": "professor"}},
+        {"$unwind": {"path": "$professor", "preserveNullAndEmptyArrays": True}},
+        {"$project": {"_id": 0, "disciplina": "$disciplina.nome", "professor": "$professor.nome",
+                      "semestre": 1, "avg": 1, "avi": 1, "avc": 1}},
     ]
-    return list(banco.notas.aggregate(pipeline))
+    dados = list(banco.notas.aggregate(pipeline))
+    for d in dados:  # disciplina concatenada com o professor (notas antigas ficam só com a disciplina)
+        d["disciplina"] = rotulo_disciplina(d["disciplina"], d.pop("professor", None))
+    return sorted(dados, key=lambda d: (d["disciplina"], d["semestre"]))
 
 
 def montar_boletim(dados):

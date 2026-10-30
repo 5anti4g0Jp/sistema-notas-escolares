@@ -12,6 +12,7 @@ Sinais:
 """
 
 from calculos import media_da_nota, montar_boletim
+from professores import rotulo_disciplina
 
 LIMITE_MEDIO = 25
 LIMITE_ALTO = 50
@@ -90,11 +91,16 @@ def avaliar_todos(banco):
         {"$lookup": {"from": "disciplinas", "localField": "disciplina_id",
                      "foreignField": "_id", "as": "disciplina"}},
         {"$unwind": "$disciplina"},
+        {"$lookup": {"from": "professores", "localField": "professor_id",
+                     "foreignField": "_id", "as": "professor"}},
+        {"$unwind": {"path": "$professor", "preserveNullAndEmptyArrays": True}},
         {"$project": {"_id": 0, "aluno_id": 1, "disciplina": "$disciplina.nome",
+                      "professor": "$professor.nome",
                       "semestre": 1, "avg": 1, "avi": 1, "avc": 1}},
     ]
     por_aluno = {}
     for d in banco.notas.aggregate(pipeline):
+        d["disciplina"] = rotulo_disciplina(d["disciplina"], d.pop("professor", None))
         por_aluno.setdefault(d["aluno_id"], []).append(d)
 
     resultado = []

@@ -32,8 +32,20 @@ def criar_indices(banco):
         banco.notas.drop_index("aluno_id_1_disciplina_id_1_bimestre_1")
     except OperationFailure:
         pass  # já foi removido (ou nunca existiu)
+    # Uma nota por aluno + disciplina + semestre + professor. Notas antigas (sem professor_id)
+    # contam como professor vazio, então continuam únicas por aluno + disciplina + semestre.
+    try:
+        banco.notas.drop_index("aluno_id_1_disciplina_id_1_semestre_1")
+    except OperationFailure:
+        pass
     banco.notas.create_index(
-        [("aluno_id", ASCENDING), ("disciplina_id", ASCENDING), ("semestre", ASCENDING)],
+        [("aluno_id", ASCENDING), ("disciplina_id", ASCENDING), ("semestre", ASCENDING),
+         ("professor_id", ASCENDING)],
         unique=True,
         partialFilterExpression={"semestre": {"$exists": True}},
     )
+    banco.notas.create_index("professor_id")
+    banco.professores.create_index("nome_chave", unique=True)  # nome em minúsculas: "Ana" = "ana"
+    banco.alocacoes.create_index(
+        [("professor_id", ASCENDING), ("disciplina_id", ASCENDING), ("ano", ASCENDING),
+         ("turma", ASCENDING)], unique=True)
