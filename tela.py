@@ -5,6 +5,7 @@ Execute com: python tela.py
 """
 
 import os
+import queue
 import threading
 import tkinter as tk
 from datetime import datetime, timezone
@@ -14,6 +15,7 @@ from pymongo.errors import DuplicateKeyError, PyMongoError
 
 import autenticacao
 import professores
+import resumo_ia
 from banco import conectar_banco
 from calculos import (PROVAS, SEMESTRES, calcular_media, fmt, ler_nota_opcional,
                       media_da_nota, medias_por_disciplina, montar_boletim,
@@ -57,6 +59,43 @@ def preencher(tabela, linhas, iids=None):
 def limpar_campos(*entradas):
     for entrada in entradas:
         entrada.delete(0, "end")
+
+
+class Carregando(ttk.Frame):
+    """Indicador de carregamento: barra que corre e reticências animadas ("Gerando resumo...").
+
+    Só anima enquanto `iniciar` estiver valendo e some em `parar`. Não bloqueia a janela:
+    quem usa deve rodar o trabalho demorado em outra thread (veja App.rodar_em_segundo_plano).
+    """
+
+    def __init__(self, pai, texto="Carregando"):
+        super().__init__(pai)
+        self.texto, self.passo, self.tarefa = texto, 0, None
+        self.rotulo = ttk.Label(self, anchor="w", foreground="#555555")
+        self.rotulo.pack(side="left")
+        self.barra = ttk.Progressbar(self, mode="indeterminate", length=160)
+
+    def iniciar(self, texto=None):
+        if texto:
+            self.texto = texto
+        self.rotulo.config(width=len(self.texto) + 3)  # largura fixa: o texto não "pula" ao animar
+        if self.tarefa is None:
+            self.barra.pack(side="left", padx=8)
+            self.barra.start(12)
+            self.animar()
+
+    def animar(self):
+        self.rotulo.config(text=self.texto + "." * (self.passo % 4))
+        self.passo += 1
+        self.tarefa = self.after(350, self.animar)
+
+    def parar(self):
+        if self.tarefa is not None:
+            self.after_cancel(self.tarefa)
+            self.tarefa = None
+        self.barra.stop()
+        self.barra.pack_forget()
+        self.rotulo.config(text="")
 
 
 class Login(tk.Tk):
@@ -920,6 +959,19 @@ class App(tk.Tk):
         self.lbl_media_geral = ttk.Label(f, text="Média geral: -", font=("Segoe UI", 11, "bold"))
         self.lbl_media_geral.pack(side="bottom", anchor="e", pady=(4, 2))
 
+        resumo = ttk.LabelFrame(f, text="Resumo por IA (Gemini)", padding=8)
+        resumo.pack(side="bottom", fill="x", pady=(6, 0))
+        linha = ttk.Frame(resumo)
+        linha.pack(fill="x")
+        self.bt_resumo = ttk.Button(linha, text="Gerar resumo", command=self.gerar_resumo_ia)
+        self.bt_resumo.pack(side="left")
+        self.carregando = Carregando(linha, "Gerando resumo com IA")
+        self.carregando.pack(side="left", padx=10)
+        self.txt_resumo = tk.Text(resumo, height=5, wrap="word", state="disabled", relief="flat",
+                                  background="#f4f4f4", font=("Segoe UI", 10))
+        self.txt_resumo.pack(fill="x", pady=(6, 0))
+        self.resumo_em_andamento = False
+
         quadro = ttk.Frame(f)
         quadro.pack(fill="both", expand=True, pady=6)
         self.arvore = ttk.Treeview(quadro, columns=("avg", "avi", "avc", "media"),
@@ -936,10 +988,79 @@ class App(tk.Tk):
         barra.pack(side="right", fill="y")
         self.cb_bol_aluno.bind("<<ComboboxSelected>>", lambda e: self.gerar_boletim())
 
+    def mostrar_resumo(self, texto):
+        self.txt_resumo.config(state="normal")
+        self.txt_resumo.delete("1.0", "end")
+        self.txt_resumo.insert("1.0", texto)
+        self.txt_resumo.config(state="disabled")
+
+    def rodar_em_segundo_plano(self, funcao, ao_concluir, ao_falhar):
+        """Roda `funcao` numa thread, sem travar a janela, e chama o retorno na thread da tela."""
+        fila = queue.Queue()
+
+        def trabalho():
+            try:
+                fila.put((True, funcao()))
+            except Exception as erro:  # o erro volta para a tela, que decide o que mostrar
+                fila.put((False, erro))
+
+        def verificar():
+            try:
+                if not self.winfo_exists():
+                    return
+                ok, valor = fila.get_nowait()
+            except queue.Empty:
+                self.after(100, verificar)
+                return
+            except tk.TclError:  # a janela foi fechada no meio
+                return
+            (ao_concluir if ok else ao_falhar)(valor)
+
+        threading.Thread(target=trabalho, daemon=True).start()
+        self.after(100, verificar)
+
+    def gerar_resumo_ia(self):
+        escolhido = self.cb_bol_aluno.get()
+        aluno = self.mapa_alunos.get(escolhido)
+        if not aluno:
+            return messagebox.showwarning("Atenção", "Selecione um aluno.")
+        if self.resumo_em_andamento:
+            return
+        try:
+            semestres, geral, _ = montar_boletim(notas_do_aluno(self.banco, aluno["_id"]))
+        except PyMongoError as erro:
+            return self.erro_banco(erro)
+        if geral is None:
+            return messagebox.showinfo("Resumo por IA", "Esse aluno ainda não possui médias para resumir.")
+        if not messagebox.askyesno(
+                "Enviar ao Gemini",
+                "As notas e os nomes das disciplinas serão enviados ao Gemini (serviço externo).\n"
+                "Nome, matrícula, turma e professor NÃO são enviados.\n\nContinuar?"):
+            return
+
+        self.resumo_em_andamento = True
+        self.bt_resumo.config(state="disabled")
+        self.mostrar_resumo("")
+        self.carregando.iniciar()
+
+        def terminou(texto):
+            self.resumo_em_andamento = False
+            self.bt_resumo.config(state="normal")
+            self.carregando.parar()
+            if self.cb_bol_aluno.get() == escolhido:  # se trocou de aluno no meio, descarta
+                self.mostrar_resumo(texto)
+
+        def falhou(erro):
+            mensagem = str(erro) if isinstance(erro, resumo_ia.ResumoIAError) else f"Erro inesperado: {erro}"
+            terminou(mensagem)
+
+        self.rodar_em_segundo_plano(lambda: resumo_ia.gerar_resumo(semestres, geral), terminou, falhou)
+
     def gerar_boletim(self):
         aluno = self.mapa_alunos.get(self.cb_bol_aluno.get())
         if not aluno:
             return messagebox.showwarning("Atenção", "Selecione um aluno.")
+        self.mostrar_resumo("")  # o resumo anterior era de outro aluno
         try:
             dados = notas_do_aluno(self.banco, aluno["_id"])
         except PyMongoError as erro:

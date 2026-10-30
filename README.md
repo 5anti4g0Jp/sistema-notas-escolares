@@ -32,6 +32,14 @@ Veja `.env.example`.
 Opcional: defina `ADMIN_SETUP_CODE` antes do primeiro acesso para exigir um código
 na criação do primeiro administrador.
 
+## Resumo por IA (Gemini)
+
+No Boletim, o botão **Gerar resumo** pede ao Gemini um texto curto sobre o desempenho do aluno, com uma
+animação de carregamento enquanto espera (a janela continua livre). Precisa de internet e de uma chave:
+defina `GEMINI_API_KEY` ou crie `chave_gemini.txt` ao lado do programa (o arquivo é ignorado pelo git).
+`GEMINI_MODEL` troca o modelo. Só notas e nomes de disciplinas são enviados; nome, matrícula, turma e
+professor ficam de fora, e o programa pede confirmação antes de enviar. A lógica está em `resumo_ia.py`.
+
 ## Demonstração sem banco
 
 ```
@@ -79,6 +87,7 @@ Os perfis são administrador, professor e consulta.
 - `risco.py` – alerta de risco acadêmico
 - `tela.py` – interface gráfica
 - `main.py`, `interface.py`, `cadastros.py`, `notas.py`, `consultas.py`, `relatorios.py`, `entrada.py` – terminal
+- `resumo_ia.py` – resumo do desempenho gerado pelo Gemini
 - `graficos.py` – gráfico de médias
 - `tests/` – testes (`python -m unittest discover tests`)
 
