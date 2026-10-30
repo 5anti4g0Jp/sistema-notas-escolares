@@ -170,11 +170,9 @@ class App(tk.Tk):
         self.botoes_cadastro = []
         self.sair_para_login = False
         self.mapa_alunos = {}
-        self.mapa_disciplinas = {}
         self.alunos_por_iid = {}
         self.disciplinas_por_iid = {}
         self.combos_alunos = []
-        self.combos_disciplinas = []
         self.opcoes_nota = {}
         self.mapa_aloc_disc = {}
         self.mapa_professores = {}
@@ -269,15 +267,12 @@ class App(tk.Tk):
         except PyMongoError as erro:
             return self.erro_banco(erro)
         self.mapa_alunos = {f"{a['matricula']} - {a['nome']}": a for a in alunos}
-        self.mapa_disciplinas = {f"{d['codigo']} - {d['nome']}": d for d in disciplinas}
         self.alunos_por_iid = {str(a["_id"]): a for a in alunos}
         self.disciplinas_por_iid = {str(d["_id"]): d for d in disciplinas}
-        for combos, mapa in ((self.combos_alunos, self.mapa_alunos),
-                             (self.combos_disciplinas, self.mapa_disciplinas)):
-            for cb in combos:
-                cb["values"] = list(mapa)
-                if cb.get() not in mapa:  # item renomeado ou excluído
-                    cb.set("")
+        for cb in self.combos_alunos:
+            cb["values"] = list(self.mapa_alunos)
+            if cb.get() not in self.mapa_alunos:  # aluno renomeado ou excluído
+                cb.set("")
         self.lista_alunos = alunos
         self.atualizar_filtros_turma()
         self.atualizar_tabela_alunos()

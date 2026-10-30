@@ -84,3 +84,90 @@ class TestProfessores(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+try:
+    from fastapi.testclient import TestClient
+except ImportError:  # sem fastapi/httpx instalados
+    TestClient = None
+
+SENHA = "Senha12345"
+
+
+@unittest.skipIf(TestClient is None, "instale fastapi, httpx e pyjwt para testar a API")
+class TestApiProfessores(unittest.TestCase):
+    """A API não pode contornar as regras de professor, nem apagar a nota de outro professor."""
+
+    def setUp(self):
+        import api
+        self.banco = mongomock.MongoClient()["api_prof"]
+        modulo_banco.criar_indices(self.banco)
+        self.c = TestClient(api.criar_app(self.banco))
+        self.c.__enter__()
+        self.addCleanup(self.c.__exit__, None, None, None)
+        self.c.post("/primeiro-acesso", json={"usuario": "admin", "senha": SENHA})
+        self.h = self.entrar("admin", SENHA)
+        self.poo = self.c.post("/disciplinas", json={"nome": "POO", "codigo": "POO", "carga_horaria": 60},
+                               headers=self.h).json()["id"]
+        self.edf = self.c.post("/disciplinas", json={"nome": "Ed Fisica", "codigo": "EDF", "carga_horaria": 40},
+                               headers=self.h).json()["id"]
+        self.aluno = self.c.post("/alunos", json={"nome": "Ze", "matricula": "1", "turma": "Turma A"},
+                                 headers=self.h).json()["id"]
+        from bson import ObjectId
+        self.ana = professores.criar_professor(self.banco, "Ana", [ObjectId(self.poo)])
+        self.beto = professores.criar_professor(self.banco, "Beto", [ObjectId(self.poo)])
+        self.oid = ObjectId
+
+    def entrar(self, usuario, senha):
+        token = self.c.post("/login", json={"usuario": usuario, "senha": senha}).json()["access_token"]
+        return {"Authorization": f"Bearer {token}"}
+
+    def lancar(self, disciplina, professor=None, **notas):
+        url = f"/alunos/{self.aluno}/notas/{disciplina}/1"
+        if professor:
+            url += f"?professor_id={professor}"
+        return self.c.put(url, json=notas or {"avg": 9, "avi": 9}, headers=self.h)
+
+    def test_disciplina_fora_da_turma_e_recusada(self):
+        professores.alocar(self.banco, self.ana, self.oid(self.poo), 2026, "Turma A")
+        self.assertEqual(self.lancar(self.edf).status_code, 409)
+        self.assertEqual(self.banco.notas.count_documents({}), 0)
+
+    def test_nota_sai_com_o_professor_da_turma(self):
+        professores.alocar(self.banco, self.ana, self.oid(self.poo), 2026, "Turma A")
+        self.assertEqual(self.lancar(self.poo).status_code, 200)
+        self.assertEqual(self.banco.notas.find_one()["professor_id"], self.ana)
+
+    def test_dois_professores_exigem_escolha_e_nao_se_sobrescrevem(self):
+        for prof in (self.ana, self.beto):
+            professores.alocar(self.banco, prof, self.oid(self.poo), 2026, "Turma A")
+        self.assertEqual(self.lancar(self.poo).status_code, 409)  # ambíguo
+        self.assertEqual(self.lancar(self.poo, str(self.ana), avg=9, avi=9).status_code, 200)
+        self.assertEqual(self.lancar(self.poo, str(self.beto), avg=5, avi=5).status_code, 200)
+        self.assertEqual(self.banco.notas.count_documents({}), 2)  # a do Beto não apagou a da Ana
+
+    def test_professor_de_outra_turma_e_recusado(self):
+        professores.alocar(self.banco, self.ana, self.oid(self.poo), 2026, "Turma A")
+        self.assertEqual(self.lancar(self.poo, str(self.beto)).status_code, 409)
+
+    def test_turma_sem_alocacao_continua_lancando(self):
+        self.assertEqual(self.lancar(self.poo).status_code, 200)
+        self.assertEqual(self.lancar(self.poo, avg=7, avi=7).status_code, 200)  # atualiza, não duplica
+        self.assertEqual(self.banco.notas.count_documents({}), 1)
+
+    def test_excluir_disciplina_limpa_habilitacao_e_alocacao(self):
+        professores.alocar(self.banco, self.ana, self.oid(self.poo), 2026, "Turma A")
+        self.c.delete(f"/disciplinas/{self.poo}", headers=self.h)
+        self.assertEqual(self.banco.alocacoes.count_documents({}), 0)
+        self.assertEqual(self.banco.professores.find_one({"_id": self.ana})["disciplinas"], [])
+
+    def test_token_antigo_morre_quando_a_senha_muda(self):
+        self.c.post("/usuarios", json={"usuario": "prof", "senha": "abc12345", "perfil": "professor"},
+                    headers=self.h)
+        antigo = self.entrar("prof", "abc12345")
+        self.assertEqual(self.c.get("/me", headers=antigo).status_code, 200)
+        import time
+        time.sleep(1.1)  # o token guarda o horário em segundos
+        self.c.put("/usuarios/prof/senha", json={"senha": "nova12345"}, headers=self.h)
+        self.assertEqual(self.c.get("/me", headers=antigo).status_code, 401)
+        self.assertEqual(self.c.get("/me", headers=self.entrar("prof", "nova12345")).status_code, 200)

@@ -7,8 +7,6 @@ Regras de negócio:
   com professores diferentes. Só não se repete a combinação professor + disciplina + ano + turma.
 """
 
-from pymongo.errors import DuplicateKeyError  # noqa: F401  (reexportado para quem chama)
-
 
 class RegraError(ValueError):
     """Violação de regra de negócio, com mensagem pronta para mostrar ao usuário."""
@@ -91,14 +89,20 @@ def remover_disciplina_dos_professores(banco, disciplina_id):
     banco.professores.update_many({}, {"$pull": {"disciplinas": disciplina_id}})
 
 
-def listar_alocacoes(banco):
-    """Alocações com nomes, ordenadas por professor, disciplina, ano e turma."""
-    professores = {p["_id"]: p["nome"] for p in banco.professores.find()}
-    disciplinas = {d["_id"]: d["nome"] for d in banco.disciplinas.find()}
+def listar_alocacoes(banco, turma=None):
+    """Alocações com nomes, ordenadas por professor, disciplina, ano e turma.
+
+    Com `turma`, consulta só ela. Vínculos cujo professor ou disciplina não existem mais são ignorados.
+    """
+    alocacoes = list(banco.alocacoes.find({"turma": turma} if turma else {}))
+    professores = {p["_id"]: p["nome"] for p in banco.professores.find(
+        {"_id": {"$in": [a["professor_id"] for a in alocacoes]}})}
+    disciplinas = {d["_id"]: d["nome"] for d in banco.disciplinas.find(
+        {"_id": {"$in": [a["disciplina_id"] for a in alocacoes]}})}
     linhas = [{"_id": a["_id"], "professor_id": a["professor_id"], "disciplina_id": a["disciplina_id"],
-               "professor": professores.get(a["professor_id"], "?"),
-               "disciplina": disciplinas.get(a["disciplina_id"], "?"),
-               "ano": a["ano"], "turma": a["turma"]} for a in banco.alocacoes.find()]
+               "professor": professores[a["professor_id"]], "disciplina": disciplinas[a["disciplina_id"]],
+               "ano": a["ano"], "turma": a["turma"]}
+              for a in alocacoes if a["professor_id"] in professores and a["disciplina_id"] in disciplinas]
     return sorted(linhas, key=lambda a: (a["professor"].casefold(), a["disciplina"].casefold(),
                                          a["ano"], a["turma"].casefold()))
 
@@ -109,7 +113,7 @@ def opcoes_de_lancamento(banco, turma):
     Se a turma tem alocações, só elas valem (disciplina + professor). Turmas sem nenhuma
     alocação continuam lançando por disciplina, como antes dos professores existirem.
     """
-    alocacoes = [a for a in listar_alocacoes(banco) if a["turma"] == turma]
+    alocacoes = listar_alocacoes(banco, turma)
     if alocacoes:
         vistos, opcoes = set(), []
         for a in alocacoes:  # o mesmo vínculo em anos diferentes vira uma só opção
@@ -121,3 +125,29 @@ def opcoes_de_lancamento(banco, turma):
         return opcoes
     return [(d["_id"], None, f"{d['codigo']} - {d['nome']}")
             for d in banco.disciplinas.find().sort("nome", 1)]
+
+
+def candidatos(banco, turma, disciplina_id):
+    """Professores que podem lançar nota nessa disciplina para a turma: [(professor_id, nome)].
+
+    Turma sem alocações: [(None, None)] (lançamento só por disciplina). Lista vazia = a turma não tem a disciplina.
+    """
+    alocacoes = listar_alocacoes(banco, turma)
+    if not alocacoes:
+        return [(None, None)] if banco.disciplinas.find_one({"_id": disciplina_id}) else []
+    return list({a["professor_id"]: a["professor"] for a in alocacoes
+                 if a["disciplina_id"] == disciplina_id}.items())
+
+
+def resolver_professor(banco, turma, disciplina_id, professor_id=None):
+    """Professor dono da nota, ou RegraError. É a regra única usada pela tela, pelo terminal e pela API."""
+    validos = candidatos(banco, turma, disciplina_id)
+    if not validos:
+        raise RegraError("Essa disciplina não é lecionada na turma do aluno.")
+    if professor_id is not None:
+        if professor_id in [p for p, _ in validos]:
+            return professor_id
+        raise RegraError("Esse professor não leciona essa disciplina nessa turma.")
+    if len(validos) == 1:
+        return validos[0][0]
+    raise RegraError("Mais de um professor leciona essa disciplina na turma: informe o professor.")

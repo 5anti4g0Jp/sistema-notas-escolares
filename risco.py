@@ -11,8 +11,8 @@ Sinais:
   - disciplinas com dados incompletos (menos de 2 provas lançadas)
 """
 
-from calculos import media_da_nota, montar_boletim
-from professores import rotulo_disciplina
+from calculos import (ESTAGIOS_DISCIPLINA_E_PROFESSOR, concatenar_professor, media_da_nota,
+                      montar_boletim)
 
 LIMITE_MEDIO = 25
 LIMITE_ALTO = 50
@@ -88,19 +88,13 @@ def avaliar_todos(banco):
     nome, matricula, turma e o resultado de avaliar_aluno."""
     pipeline = [
         {"$match": {"semestre": {"$exists": True}}},
-        {"$lookup": {"from": "disciplinas", "localField": "disciplina_id",
-                     "foreignField": "_id", "as": "disciplina"}},
-        {"$unwind": "$disciplina"},
-        {"$lookup": {"from": "professores", "localField": "professor_id",
-                     "foreignField": "_id", "as": "professor"}},
-        {"$unwind": {"path": "$professor", "preserveNullAndEmptyArrays": True}},
+        *ESTAGIOS_DISCIPLINA_E_PROFESSOR,
         {"$project": {"_id": 0, "aluno_id": 1, "disciplina": "$disciplina.nome",
                       "professor": "$professor.nome",
                       "semestre": 1, "avg": 1, "avi": 1, "avc": 1}},
     ]
     por_aluno = {}
-    for d in banco.notas.aggregate(pipeline):
-        d["disciplina"] = rotulo_disciplina(d["disciplina"], d.pop("professor", None))
+    for d in map(concatenar_professor, banco.notas.aggregate(pipeline)):
         por_aluno.setdefault(d["aluno_id"], []).append(d)
 
     resultado = []

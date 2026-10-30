@@ -45,22 +45,31 @@ def fmt(valor):
     return "-" if valor is None else f"{valor:.2f}"
 
 
+ESTAGIOS_DISCIPLINA_E_PROFESSOR = [
+    {"$lookup": {"from": "disciplinas", "localField": "disciplina_id",
+                 "foreignField": "_id", "as": "disciplina"}},
+    {"$unwind": "$disciplina"},
+    {"$lookup": {"from": "professores", "localField": "professor_id",
+                 "foreignField": "_id", "as": "professor"}},
+    {"$unwind": {"path": "$professor", "preserveNullAndEmptyArrays": True}},  # notas antigas: sem professor
+]
+
+
+def concatenar_professor(nota):
+    """Troca 'disciplina' (nome) por 'Disciplina - Prof. Nome' numa nota vinda de ESTAGIOS_*."""
+    nota["disciplina"] = rotulo_disciplina(nota["disciplina"], nota.pop("professor", None))
+    return nota
+
+
 def notas_do_aluno(banco, aluno_id):
-    """Notas do aluno (modelo por semestre) com o nome da disciplina."""
+    """Notas do aluno (modelo por semestre) com a disciplina concatenada com o professor."""
     pipeline = [
         {"$match": {"aluno_id": aluno_id, "semestre": {"$exists": True}}},
-        {"$lookup": {"from": "disciplinas", "localField": "disciplina_id",
-                     "foreignField": "_id", "as": "disciplina"}},
-        {"$unwind": "$disciplina"},
-        {"$lookup": {"from": "professores", "localField": "professor_id",
-                     "foreignField": "_id", "as": "professor"}},
-        {"$unwind": {"path": "$professor", "preserveNullAndEmptyArrays": True}},
+        *ESTAGIOS_DISCIPLINA_E_PROFESSOR,
         {"$project": {"_id": 0, "disciplina": "$disciplina.nome", "professor": "$professor.nome",
                       "semestre": 1, "avg": 1, "avi": 1, "avc": 1}},
     ]
-    dados = list(banco.notas.aggregate(pipeline))
-    for d in dados:  # disciplina concatenada com o professor (notas antigas ficam só com a disciplina)
-        d["disciplina"] = rotulo_disciplina(d["disciplina"], d.pop("professor", None))
+    dados = [concatenar_professor(d) for d in banco.notas.aggregate(pipeline)]
     return sorted(dados, key=lambda d: (d["disciplina"], d["semestre"]))
 
 

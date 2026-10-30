@@ -157,9 +157,17 @@ def trocar_senha(banco, usuario, nova_senha):
         raise ValueError(erro)
     nome = usuario.strip().lower()
     salt, hash_senha = gerar_hash(nova_senha)
-    resultado = banco.usuarios.update_one({"usuario": nome}, {"$set": {"salt": salt, "hash": hash_senha}})
+    resultado = banco.usuarios.update_one(
+        {"usuario": nome},
+        {"$set": {"salt": salt, "hash": hash_senha, "senha_alterada_em": _agora()}})
     banco.tentativas_login.delete_one({"_id": nome})
     return resultado.matched_count > 0
+
+
+def sessao_vale(documento, emitido_em):
+    """False se a senha foi trocada depois de o token ser emitido (`emitido_em` em segundos)."""
+    alterada = documento.get("senha_alterada_em")
+    return not alterada or emitido_em >= int(_como_utc(alterada).timestamp())
 
 
 def excluir_usuario(banco, usuario):

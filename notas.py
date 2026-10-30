@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from colorama import Fore
 
+import professores
 from cadastros import selecionar_aluno, selecionar_disciplina
 from calculos import PROVAS, SEMESTRES, calcular_media, fmt, ler_nota_opcional
 from entrada import ler_inteiro
@@ -24,6 +25,16 @@ def ler_prova(nome, atual):
             print(Fore.RED + "A nota deve ser um número entre 0 e 10.")
 
 
+def escolher_professor(banco, aluno, disciplina):
+    """Professor dono da nota: automático quando só há um (ou nenhum alocado); senão pergunta."""
+    opcoes = professores.candidatos(banco, aluno["turma"], disciplina["_id"])
+    if len(opcoes) <= 1:
+        return professores.resolver_professor(banco, aluno["turma"], disciplina["_id"])
+    for i, (_, nome) in enumerate(opcoes, start=1):
+        print(f"{i} - Prof. {nome}")
+    return opcoes[ler_inteiro("Professor: ", 1, len(opcoes)) - 1][0]
+
+
 def lancar_nota(banco):
     """Lança ou atualiza (upsert) as notas de um aluno em uma disciplina/semestre."""
     aluno = selecionar_aluno(banco)
@@ -33,8 +44,15 @@ def lancar_nota(banco):
     if not disciplina:
         return
 
+    try:
+        professor_id = escolher_professor(banco, aluno, disciplina)
+    except professores.RegraError as erro:
+        print(Fore.RED + str(erro))
+        return
+
     semestre = ler_inteiro(f"Semestre (1 a {SEMESTRES}): ", 1, SEMESTRES)
-    filtro = {"aluno_id": aluno["_id"], "disciplina_id": disciplina["_id"], "semestre": semestre}
+    filtro = {"aluno_id": aluno["_id"], "disciplina_id": disciplina["_id"], "semestre": semestre,
+              "professor_id": professor_id}
     existente = banco.notas.find_one(filtro) or {}
 
     notas = {nome.lower(): ler_prova(nome, existente.get(nome.lower())) for nome in PROVAS}

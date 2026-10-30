@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 from pymongo.errors import DuplicateKeyError
 
 import autenticacao
+import professores
 from calculos import (SEMESTRES, media_da_nota, montar_boletim, notas_do_aluno, ranking_turmas)
 from risco import avaliar_aluno, avaliar_todos
 
@@ -143,11 +144,12 @@ def criar_app(banco=None):
         if cred is None:
             raise erro
         try:
-            nome = jwt.decode(cred.credentials, segredo, algorithms=["HS256"])["sub"]
-        except (jwt.PyJWTError, KeyError):
+            dados = jwt.decode(cred.credentials, segredo, algorithms=["HS256"])
+            nome, emitido_em = dados["sub"], int(dados["iat"])
+        except (jwt.PyJWTError, KeyError, TypeError, ValueError):
             raise erro
         documento = bd.usuarios.find_one({"usuario": nome})  # usuário excluído perde o acesso na hora
-        if not documento:
+        if not documento or not autenticacao.sessao_vale(documento, emitido_em):  # senha trocada: token morre
             raise erro
         return {"usuario": nome, "perfil": autenticacao.perfil_do(documento)}
 
@@ -276,6 +278,7 @@ def criar_app(banco=None):
         if not bd.disciplinas.find_one({"_id": oid}):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Disciplina não encontrada.")
         bd.notas.delete_many({"disciplina_id": oid})
+        professores.remover_disciplina_dos_professores(bd, oid)
         bd.disciplinas.delete_one({"_id": oid})
         return Response(status_code=204)
 
@@ -287,9 +290,13 @@ def criar_app(banco=None):
 
     @app.put("/alunos/{aluno_id}/notas/{disciplina_id}/{semestre}", tags=["Notas"])
     def lancar_notas(aluno_id: str, disciplina_id: str, notas: NotasIn,
-                     semestre: int = Path(ge=1, le=SEMESTRES), bd=Depends(obter_banco),
-                     _=Depends(exigir(ADMIN, PROFESSOR))):
-        """Cria ou atualiza as notas (AVG, AVI, AVC) do aluno na disciplina e semestre."""
+                     semestre: int = Path(ge=1, le=SEMESTRES),
+                     professor_id: Optional[str] = Query(None, description="obrigatório se a turma tem mais de "
+                                                         "um professor na disciplina"),
+                     bd=Depends(obter_banco), _=Depends(exigir(ADMIN, PROFESSOR))):
+        """Cria ou atualiza as notas (AVG, AVI, AVC) do aluno na disciplina e semestre.
+
+        Se a turma do aluno tem alocações, só vale um professor alocado nela naquela disciplina."""
         aluno = aluno_ou_404(bd, aluno_id)
         disciplina = bd.disciplinas.find_one({"_id": _oid(disciplina_id)})
         if not disciplina:
@@ -298,7 +305,13 @@ def criar_app(banco=None):
         if all(v is None for v in provas.values()):
             raise HTTPException(422, "Informe pelo menos uma nota.")
         provas = {k: _arredondar(v) for k, v in provas.items()}
-        filtro = {"aluno_id": aluno["_id"], "disciplina_id": disciplina["_id"], "semestre": semestre}
+        try:
+            dono = professores.resolver_professor(
+                bd, aluno["turma"], disciplina["_id"], _oid(professor_id) if professor_id else None)
+        except professores.RegraError as erro:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(erro))
+        filtro = {"aluno_id": aluno["_id"], "disciplina_id": disciplina["_id"], "semestre": semestre,
+                  "professor_id": dono}
         bd.notas.replace_one(filtro, {**filtro, **provas, "data_lancamento": datetime.now(timezone.utc)},
                              upsert=True)
         return {"aluno": aluno["nome"], "disciplina": disciplina["nome"], "semestre": semestre,
