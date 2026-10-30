@@ -1,0 +1,13 @@
+# Segredos: nunca versionar
+.env
+*.env
+chave_gemini.txt
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Editores
+.idea/
