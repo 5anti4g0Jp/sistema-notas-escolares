@@ -90,6 +90,7 @@ professor é o administrador, na aba *Usuários*.
 - `professores.py` – professores, habilitações e alocações
 - `risco.py` – alerta de risco acadêmico
 - `tela.py` – interface gráfica
+- `tema.py` – visual no estilo iOS (paleta, fontes, botões/campos/abas arredondados)
 - `main.py`, `interface.py`, `cadastros.py`, `notas.py`, `consultas.py`, `relatorios.py`, `entrada.py` – terminal
 - `resumo_ia.py` – resumo do desempenho gerado pelo Gemini
 - `graficos.py` – gráfico de médias

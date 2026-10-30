@@ -9,7 +9,6 @@ import queue
 import threading
 import tkinter as tk
 from datetime import datetime, timezone
-from tkinter import font as tkfont
 from tkinter import messagebox, ttk
 
 from pymongo.errors import DuplicateKeyError, PyMongoError
@@ -23,68 +22,14 @@ from calculos import (PROVAS, SEMESTRES, calcular_media, fmt, ler_nota_opcional,
                       notas_do_aluno, ranking_turmas)
 from config import NOME_BANCO
 from risco import NOTA_MINIMA, avaliar_aluno, avaliar_todos
-
-# Paleta única da interface (tudo que tem cor no programa sai daqui)
-BG = "#f3f5fa"        # fundo das janelas
-CARTAO = "#ffffff"    # campos, tabelas e áreas de texto
-TEXTO = "#1f2937"
-MUDO = "#5b6475"      # textos de apoio
-ACENTO = "#2f5bd8"    # ação principal e destaques
-ACENTO_ESCURO = "#2449b3"
-BORDA = "#c9d1e3"
-FAIXA = "#e6ebf5"     # cabeçalhos, abas inativas e fundo da barra de carregamento
-SELECAO = "#d6e2fb"
-PERIGO = "#b3261e"    # médias abaixo do mínimo e ações destrutivas
-BOM = "#1b6e3c"
+from tema import (ACENTO, BG, BOM, BORDA, CARTAO, FAIXA, MUDO, PERIGO, SELECAO,  # noqa: F401
+                  TEXTO, aplicar_tema)
 
 TODAS_TURMAS = "Todas as turmas"
 # O professor só lança notas e consulta; cadastros, vínculos e usuários nem aparecem para ele.
 ABAS_DO_PROFESSOR = ("Lançar notas", "Boletim", "Ranking de turmas", "Alerta de risco")
 COLUNAS_NOTAS = ("Disciplina", "Semestre", "AVG", "AVI", "AVC", "Média")
 LARGURAS_NOTAS = (320, 90, 90, 90, 90, 100)
-
-
-def aplicar_tema(janela):
-    """Deixa todas as janelas com o mesmo visual (base clam, cores da paleta acima)."""
-    janela.configure(background=BG)
-    for nome in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont"):
-        tkfont.nametofont(nome, root=janela).configure(size=10)
-    negrito = tkfont.nametofont("TkDefaultFont", root=janela).copy()
-    negrito.configure(weight="bold")
-    janela.fonte_negrito = negrito  # o Tk apaga a fonte se o Python a descartar; guardar na janela evita isso
-    e = ttk.Style(janela)
-    e.theme_use("clam")
-    e.configure(".", background=BG, foreground=TEXTO, bordercolor=BORDA, lightcolor=BG, darkcolor=BG,
-                troughcolor=FAIXA, focuscolor=ACENTO)
-    e.configure("TFrame", background=BG)
-    e.configure("TLabel", background=BG, foreground=TEXTO)
-    e.configure("TLabelframe", background=BG, bordercolor=BORDA)
-    e.configure("TLabelframe.Label", background=BG, foreground=ACENTO, font=negrito)
-    e.configure("TNotebook", background=BG, borderwidth=0, tabmargins=(0, 4, 0, 0))
-    e.configure("TNotebook.Tab", background=FAIXA, foreground=MUDO, padding=(14, 7), borderwidth=0)
-    e.map("TNotebook.Tab", background=[("selected", BG), ("active", "#dde4f3")],
-          foreground=[("selected", ACENTO)])
-    e.configure("TButton", background=FAIXA, foreground=TEXTO, padding=(12, 6), bordercolor=BORDA,
-                relief="flat")
-    e.map("TButton", background=[("disabled", "#eceff5"), ("pressed", "#cfd8ec"), ("active", "#dbe3f4")],
-          foreground=[("disabled", "#9aa3b5")])
-    e.configure("Acento.TButton", background=ACENTO, foreground="white", bordercolor=ACENTO)
-    e.map("Acento.TButton", background=[("disabled", "#a9b8e6"), ("pressed", ACENTO_ESCURO), ("active", "#3d68e0")],
-          foreground=[("disabled", "white")], bordercolor=[("disabled", "#a9b8e6")])
-    e.configure("Perigo.TButton", foreground=PERIGO)
-    e.map("Perigo.TButton", foreground=[("disabled", "#9aa3b5")])
-    for campo in ("TEntry", "TCombobox", "TSpinbox"):
-        e.configure(campo, fieldbackground=CARTAO, bordercolor=BORDA, padding=4)
-        e.map(campo, bordercolor=[("focus", ACENTO)])
-    e.map("TCombobox", fieldbackground=[("readonly", CARTAO)], selectbackground=[("readonly", CARTAO)],
-          selectforeground=[("readonly", TEXTO)])
-    e.configure("Treeview", background=CARTAO, fieldbackground=CARTAO, foreground=TEXTO, rowheight=26,
-                bordercolor=BORDA)
-    e.map("Treeview", background=[("selected", SELECAO)], foreground=[("selected", TEXTO)])
-    e.configure("Treeview.Heading", background=FAIXA, foreground=TEXTO, relief="flat", padding=(6, 6),
-                font=negrito)
-    e.map("Treeview.Heading", background=[("active", "#dbe3f4")])
-    e.configure("TScrollbar", background="#c3cce0", troughcolor=FAIXA, bordercolor=BORDA, arrowcolor=MUDO)
 
 
 def tag_media(media):
@@ -134,7 +79,7 @@ def texto_leitura(pai, **opcoes):
     """Caixa de texto só para leitura, no visual da interface."""
     return tk.Text(pai, wrap="word", state="disabled", relief="flat", background=CARTAO, foreground=TEXTO,
                    padx=10, pady=8, highlightthickness=1, highlightbackground=BORDA,
-                   font=("Segoe UI", 10), **opcoes)
+                   font="IosCorpo", **opcoes)
 
 
 def escrever_texto(caixa, texto):
@@ -168,13 +113,13 @@ class BarraAurora(tk.Canvas):
     O degradê é desenhado uma única vez, numa imagem com dois períodos, e só desliza dentro da barra.
     """
 
-    CORES = ((47, 91, 216), (56, 178, 205), (124, 108, 224))  # azul da interface, ciano e violeta, sem neon
+    CORES = ((0, 113, 227), (50, 173, 230), (88, 86, 214))  # azul, ciano e índigo do iOS
     PASSO_PX = 2
     INTERVALO_MS = 40  # ~50 px/s: um ciclo completo a cada ~4 s com a largura padrão
 
     def __init__(self, pai, largura=160, altura=8):
         super().__init__(pai, width=largura, height=altura, bd=0, highlightthickness=1,
-                         highlightbackground=BORDA, background=FAIXA)
+                         highlightbackground=FAIXA, background=FAIXA)
         self.largura, self.altura = largura, altura
         self.deslocamento, self.tarefa = 0, None
         self.imagem = self.gerar_degrade()  # guarda a referência, senão o Tk apaga a imagem
@@ -267,7 +212,7 @@ class JanelaResumo(tk.Toplevel):
 
         corpo = ttk.Frame(self, padding=14)
         corpo.pack(fill="both", expand=True)
-        ttk.Label(corpo, text=f"Aluno: {nome_aluno}", font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        ttk.Label(corpo, text=f"Aluno: {nome_aluno}", font="IosNegritoG").pack(anchor="w")
         ttk.Label(corpo, text="Só notas e disciplinas são enviadas ao Gemini; nome, matrícula, turma e "
                               "professor não.", foreground=MUDO).pack(anchor="w", pady=(2, 8))
         linha = ttk.Frame(corpo)
@@ -329,7 +274,7 @@ class Login(tk.Tk):
         quadro = ttk.Frame(self, padding=28)
         quadro.pack(fill="both", expand=True)
         ttk.Label(quadro, text="Sistema de Notas Escolares",
-                  font=("Segoe UI", 14, "bold")).pack(pady=(0, 4))
+                  font="IosLogin").pack(pady=(0, 4))
         subtitulo = ("Primeiro acesso: crie o administrador"
                      if self.primeiro_acesso else "Acesso restrito aos administradores")
         ttk.Label(quadro, text=subtitulo).pack(pady=(0, 16))
@@ -438,13 +383,16 @@ class App(tk.Tk):
         self.geometry("1000x720")
         aplicar_tema(self)
 
-        barra = ttk.Frame(self, padding=(10, 6))
+        barra = ttk.Frame(self, padding=(20, 14, 14, 0))
         barra.pack(fill="x")
-        ttk.Label(barra, text=f"{perfil.capitalize()}: {usuario}").pack(side="left")
-        ttk.Button(barra, text="Sair", command=self.sair).pack(side="right")
+        titulos = ttk.Frame(barra)
+        titulos.pack(side="left")
+        ttk.Label(titulos, text="Notas Escolares", style="Titulo.TLabel").pack(anchor="w")
+        ttk.Label(titulos, text=f"{perfil.capitalize()} · {usuario}", style="Sub.TLabel").pack(anchor="w")
+        ttk.Button(barra, text="Sair", style="Link.TButton", command=self.sair).pack(side="right", anchor="n")
 
         self.abas = ttk.Notebook(self)
-        self.abas.pack(fill="both", expand=True, padx=8, pady=8)
+        self.abas.pack(fill="both", expand=True, padx=14, pady=(10, 14))
         self.montar_aba_alunos()
         self.montar_aba_disciplinas()
         self.montar_aba_professores()
@@ -477,7 +425,7 @@ class App(tk.Tk):
 
     # ---------- utilidades ----------
     def aba(self, titulo):
-        quadro = ttk.Frame(self.abas, padding=12)
+        quadro = ttk.Frame(self.abas, padding=(4, 12, 4, 4))
         self.abas.add(quadro, text=titulo)
         self.frames_abas[titulo] = quadro
         return quadro
@@ -590,7 +538,7 @@ class App(tk.Tk):
         for coluna, titulo in (("matricula", "Matrícula"), ("turma", "Turma")):
             self.tab_alunos.heading(coluna, text=titulo, anchor="center")
             self.tab_alunos.column(coluna, width=150, anchor="center")
-        self.tab_alunos.tag_configure("turma", background="#e3eaf7", font=("Segoe UI", 9, "bold"))
+        self.tab_alunos.tag_configure("turma", background=BG, font="IosPequenoNegrito")
         barra = ttk.Scrollbar(quadro, orient="vertical", command=self.tab_alunos.yview)
         self.tab_alunos.configure(yscrollcommand=barra.set)
         self.tab_alunos.pack(side="left", fill="both", expand=True)
@@ -1020,7 +968,7 @@ class App(tk.Tk):
             entrada.grid(row=0, column=2 * i + 1)
             entrada.bind("<KeyRelease>", lambda e: self.atualizar_media_previa())
             self.e_provas[nome] = entrada
-        self.lbl_media_previa = ttk.Label(form, text="Média: -", font=("Segoe UI", 10, "bold"))
+        self.lbl_media_previa = ttk.Label(form, text="Média: -", font="IosNegrito")
         self.lbl_media_previa.grid(row=4, column=1, sticky="w", padx=8)
         ttk.Button(form, text="Lançar / atualizar notas", style="Acento.TButton", command=self.lancar_nota).grid(
             row=5, column=1, sticky="w", padx=8, pady=8)
@@ -1125,7 +1073,7 @@ class App(tk.Tk):
         quadro.pack(fill="x", pady=10)
         rotulos = {}
         for i, (chave, titulo) in enumerate((("nome", "Nome"), ("matricula", "Matrícula"), ("turma", "Turma"))):
-            ttk.Label(quadro, text=f"{titulo}:", font=("Segoe UI", 9, "bold")).grid(
+            ttk.Label(quadro, text=f"{titulo}:", font="IosPequenoNegrito").grid(
                 row=0, column=2 * i, sticky="w", padx=(0 if i == 0 else 28, 4))
             rotulo = ttk.Label(quadro, text="-")
             rotulo.grid(row=0, column=2 * i + 1, sticky="w")
@@ -1183,7 +1131,7 @@ class App(tk.Tk):
                            "Média do semestre = média das disciplinas. "
                            "Média geral = média dos semestres.\nMédia abaixo de 6 aparece em vermelho."),
                   foreground=MUDO, justify="left").pack(side="bottom", anchor="w")
-        self.lbl_media_geral = ttk.Label(f, text="Média geral: -", font=("Segoe UI", 11, "bold"))
+        self.lbl_media_geral = ttk.Label(f, text="Média geral: -", font="IosNegritoG")
         self.lbl_media_geral.pack(side="bottom", anchor="e", pady=(4, 2))
 
         quadro = ttk.Frame(f)
@@ -1195,7 +1143,7 @@ class App(tk.Tk):
         for coluna, titulo in (("avg", "AVG"), ("avi", "AVI"), ("avc", "AVC"), ("media", "Média")):
             self.arvore.heading(coluna, text=titulo, anchor="center")
             self.arvore.column(coluna, width=100, anchor="center")
-        self.arvore.tag_configure("semestre", background=FAIXA, font=("Segoe UI", 9, "bold"))
+        self.arvore.tag_configure("semestre", background=FAIXA, font="IosPequenoNegrito")
         self.arvore.tag_configure("fraca", foreground=PERIGO)
         barra = ttk.Scrollbar(quadro, orient="vertical", command=self.arvore.yview)
         self.arvore.configure(yscrollcommand=barra.set)
@@ -1308,7 +1256,7 @@ class App(tk.Tk):
         self.cb_risco_turma.set(TODAS_TURMAS)
         self.cb_risco_turma.pack(side="left")
         self.cb_risco_turma.bind("<<ComboboxSelected>>", lambda e: self.mostrar_risco())
-        self.lbl_risco_resumo = ttk.Label(topo, text="", font=("Segoe UI", 10, "bold"))
+        self.lbl_risco_resumo = ttk.Label(topo, text="", font="IosNegrito")
         self.lbl_risco_resumo.pack(side="left", padx=14)
         self.risco_por_iid = {}
         self.risco_lista = []
@@ -1325,7 +1273,7 @@ class App(tk.Tk):
             f, ("Aluno", "Turma", "Média", "Risco", "Pontos", "Motivos"),
             (170, 80, 70, 80, 70, 470))
         self.tab_risco.column("Motivos", anchor="w")
-        for nivel, cor in (("alto", "#f8d7da"), ("médio", "#fff3cd"), ("baixo", "#d9f0de")):
+        for nivel, cor in (("alto", "#FFE3E0"), ("médio", "#FFF1D0"), ("baixo", "#E1F5E6")):
             self.tab_risco.tag_configure(nivel, background=cor)
         self.tab_risco.bind("<<TreeviewSelect>>", self.mostrar_detalhe_risco)
         self.mostrar_detalhe_risco()
@@ -1394,7 +1342,7 @@ class App(tk.Tk):
                    command=self.trocar_senha_usuario).pack(side="left", padx=6)
         ttk.Button(botoes, text="Excluir selecionado", style="Perigo.TButton",
                    command=self.excluir_usuario).pack(side="left")
-        self.lbl_limite_usuarios = ttk.Label(f, text="", font=("Segoe UI", 10, "bold"))
+        self.lbl_limite_usuarios = ttk.Label(f, text="", font="IosNegrito")
         self.lbl_limite_usuarios.pack(anchor="w", pady=(4, 0))
         self.tab_usuarios = criar_tabela(f, ("Usuário", "Perfil", "Criado em"), (260, 160, 200))
         ttk.Label(f, text=("Administrador: tudo, inclusive gerenciar usuários (só existe um, e ele não pode ser "
