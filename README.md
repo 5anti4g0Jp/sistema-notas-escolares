@@ -3,6 +3,20 @@
 Python + MongoDB Atlas (banco `escola_bigdata`). Duas interfaces sobre os mesmos dados:
 janelas (Tkinter) e terminal. Há também uma API REST opcional.
 
+## Instalar em outro computador
+
+1. **Python 3.10 ou mais novo, com Tkinter.** No Windows e no macOS ele já vem. No Linux instale o pacote
+   à parte (Ubuntu/Debian: `sudo apt install python3-tk`).
+2. Copie a pasta do projeto (sem `.env` nem chaves) e, dentro dela, rode `pip install -r requirements.txt`.
+3. **MongoDB Atlas:** em *Network Access*, libere o IP do novo computador. Sem isso a conexão é recusada
+   e o sistema mostra "Erro de conexão" ao abrir.
+4. Defina `MONGODB_URI` (veja `.env.example`) e rode `python tela.py`.
+5. Para só conhecer o sistema sem banco: `python demo.py` (usa dados de exemplo em memória).
+6. Para conferir a instalação: `python -m unittest discover tests`.
+
+Chaves e senhas (`MONGODB_URI`, `API_SECRET`, chaves de IA) nunca vão no código nem no ZIP: leve-as
+separadamente, por um canal seguro, e defina-as como variáveis de ambiente no novo computador.
+
 ## Como executar
 
 ```
@@ -21,7 +35,7 @@ na criação do primeiro administrador.
 ## Demonstração sem banco
 
 ```
-python demo.py        # dados de exemplo (precisa de mongomock, já listado nos testes)
+python demo.py        # dados de exemplo em memória (mongomock já está no requirements.txt)
 ```
 
 ## API REST (opcional)

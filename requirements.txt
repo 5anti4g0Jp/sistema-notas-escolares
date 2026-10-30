@@ -8,3 +8,6 @@ fastapi>=0.110
 uvicorn>=0.29
 pyjwt>=2.8
 httpx>=0.27
+
+# Demonstração sem banco (demo.py, api.py --demo) e testes.
+mongomock>=4.1
