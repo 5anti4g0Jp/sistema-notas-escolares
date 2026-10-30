@@ -10,7 +10,6 @@ import mongomock
 
 import banco as modulo_banco
 import professores
-import tela
 
 ALUNOS = [
     ("Ana Souza", "1001", "Turma A"), ("Bruno Lima", "1002", "Turma A"),
@@ -54,6 +53,8 @@ def montar_banco():
 def executar(banco):
     """Mesmo fluxo da tela real: login (no 1º acesso você cria o administrador), depois o sistema.
     O botão Sair da janela principal volta ao login."""
+    import tela  # só aqui: a API (api.py --demo) usa montar_banco() e não precisa do Tkinter
+
     while True:
         login = tela.Login(banco)
         login.mainloop()

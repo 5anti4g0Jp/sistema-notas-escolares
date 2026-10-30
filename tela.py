@@ -1100,9 +1100,10 @@ class App(tk.Tk):
         try:
             from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
             from matplotlib.figure import Figure
-        except ImportError:
+        except ImportError as erro:  # matplotlib ausente, ou Pillow sem ImageTk (pacote do sistema no Linux)
             return messagebox.showerror(
-                "Gráfico", "Instale o matplotlib (pip install matplotlib) para ver o gráfico.")
+                "Gráfico", f"Não foi possível carregar o gráfico: {erro}\n\n"
+                           "Instale as dependências com: pip install -r requirements.txt")
         from graficos import desenhar_medias
 
         janela = tk.Toplevel(self)

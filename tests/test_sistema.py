@@ -224,3 +224,21 @@ class TestRisco(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDemoSemTkinter(unittest.TestCase):
+    def test_banco_de_demonstracao_nao_exige_tkinter(self):
+        """`python api.py --demo` roda em servidor sem Tkinter: demo.montar_banco() não pode importar a tela."""
+        import importlib
+        sys.modules.pop("demo", None)
+        original = sys.modules.get("tkinter", False)
+        sys.modules["tkinter"] = None  # simula a ausência: `import tkinter` passa a dar ImportError
+        try:
+            demo = importlib.import_module("demo")
+            self.assertGreater(demo.montar_banco().alunos.count_documents({}), 0)
+        finally:
+            sys.modules.pop("demo", None)
+            if original is False:
+                sys.modules.pop("tkinter", None)
+            else:
+                sys.modules["tkinter"] = original
