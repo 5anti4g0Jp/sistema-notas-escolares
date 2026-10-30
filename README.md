@@ -37,7 +37,8 @@ na criação do primeiro administrador.
 No Boletim, o botão **Gerar resumo** pede ao Gemini um texto curto sobre o desempenho do aluno, com uma
 animação de carregamento enquanto espera (a janela continua livre). Precisa de internet e de uma chave:
 defina `GEMINI_API_KEY` ou crie `chave_gemini.txt` ao lado do programa (o arquivo é ignorado pelo git).
-`GEMINI_MODEL` troca o modelo. Só notas e nomes de disciplinas são enviados; nome, matrícula, turma e
+Por padrão usa o `gemini-flash-lite-latest` (rápido) e, se ele estiver sobrecarregado ou indisponível,
+o `gemini-flash-latest`. `GEMINI_MODEL` fixa um modelo e desliga essa reserva. Só notas e nomes de disciplinas são enviados; nome, matrícula, turma e
 professor ficam de fora, e o programa pede confirmação antes de enviar. A lógica está em `resumo_ia.py`.
 
 ## Demonstração sem banco

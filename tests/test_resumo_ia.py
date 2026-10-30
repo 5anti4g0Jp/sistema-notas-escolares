@@ -53,7 +53,7 @@ class TestResumoIA(unittest.TestCase):
         self.assertNotIn("chave-falsa", pedido.full_url)  # a chave nunca vai na URL
 
     def test_erros_viram_mensagens_sem_vazar_a_chave(self):
-        casos = {403: "recusou", 429: "Limite", 500: "erro 500"}
+        casos = {403: "recusou", 404: "GEMINI_MODEL", 429: "Limite", 503: "sobrecarregado", 418: "erro 418"}
         for codigo, trecho in casos.items():
             erro = urllib.error.HTTPError("u", codigo, "x", {}, None)
             with mock.patch("urllib.request.urlopen", side_effect=erro):
@@ -61,6 +61,31 @@ class TestResumoIA(unittest.TestCase):
                     resumo_ia.gerar_resumo(self.semestres, self.geral)
             self.assertIn(trecho, str(ctx.exception))
             self.assertNotIn("chave-falsa", str(ctx.exception))
+
+    def test_modelo_sobrecarregado_cai_para_o_modelo_reserva(self):
+        corpo = {"candidates": [{"content": {"parts": [{"text": "Resumo ok."}]}}]}
+        cheio = urllib.error.HTTPError("u", 503, "x", {}, None)
+        with mock.patch("urllib.request.urlopen", side_effect=[cheio, resposta(corpo)]) as abrir:
+            self.assertEqual(resumo_ia.gerar_resumo(self.semestres, self.geral), "Resumo ok.")
+        usados = [c.args[0].full_url for c in abrir.call_args_list]
+        self.assertIn("gemini-flash-lite-latest", usados[0])
+        self.assertIn("gemini-flash-latest:", usados[1])
+
+    def test_chave_recusada_nao_tenta_outro_modelo(self):
+        with mock.patch("urllib.request.urlopen",
+                        side_effect=urllib.error.HTTPError("u", 403, "x", {}, None)) as abrir:
+            with self.assertRaises(resumo_ia.ResumoIAError):
+                resumo_ia.gerar_resumo(self.semestres, self.geral)
+        self.assertEqual(abrir.call_count, 1)
+
+    def test_gemini_model_desliga_a_reserva(self):
+        cheio = urllib.error.HTTPError("u", 503, "x", {}, None)
+        with mock.patch.dict(os.environ, {"GEMINI_MODEL": "meu-modelo"}), \
+                mock.patch("urllib.request.urlopen", side_effect=cheio) as abrir:
+            with self.assertRaises(resumo_ia.ResumoIAError):
+                resumo_ia.gerar_resumo(self.semestres, self.geral)
+        self.assertEqual(abrir.call_count, 1)
+        self.assertIn("meu-modelo", abrir.call_args.args[0].full_url)
 
     def test_sem_internet_e_resposta_vazia(self):
         with mock.patch("urllib.request.urlopen", side_effect=urllib.error.URLError("sem rede")):
