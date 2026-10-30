@@ -61,8 +61,60 @@ def limpar_campos(*entradas):
         entrada.delete(0, "end")
 
 
+class BarraAurora(tk.Canvas):
+    """Barra de carregamento com degradê "aurora" (ciano, roxo e azul-escuro) que corre em ciclo lento.
+
+    O degradê é desenhado uma única vez, numa imagem com dois períodos, e só desliza dentro da barra.
+    """
+
+    CORES = ((34, 211, 238), (139, 92, 246), (30, 58, 138))  # ciano, roxo, azul-escuro
+    PASSO_PX = 2
+    INTERVALO_MS = 40  # ~50 px/s: um ciclo completo a cada ~4 s com a largura padrão
+
+    def __init__(self, pai, largura=180, altura=14):
+        super().__init__(pai, width=largura, height=altura, bd=0, highlightthickness=1,
+                         highlightbackground="#8c8c8c", background="#d9d9d9")
+        self.largura, self.altura = largura, altura
+        self.deslocamento, self.tarefa = 0, None
+        self.imagem = self.gerar_degrade()  # guarda a referência, senão o Tk apaga a imagem
+        self.item = self.create_image(0, 0, anchor="nw", image=self.imagem)
+
+    def cor_em(self, x):
+        """Cor do degradê na coluna x; repete a cada `largura` pixels, então o laço não tem emenda."""
+        posicao = (x % self.largura) / self.largura * len(self.CORES)
+        i, t = int(posicao), posicao - int(posicao)
+        t = t * t * (3 - 2 * t)  # transição suave
+        a, b = self.CORES[i % len(self.CORES)], self.CORES[(i + 1) % len(self.CORES)]
+        return tuple(a[k] + (b[k] - a[k]) * t for k in range(3))
+
+    def gerar_degrade(self):
+        imagem = tk.PhotoImage(width=2 * self.largura, height=self.altura)
+        linhas = []
+        for y in range(self.altura):
+            brilho = 1.18 - 0.38 * y / max(self.altura - 1, 1)  # topo mais claro: acabamento metálico
+            cores = ("#%02x%02x%02x" % tuple(min(255, round(c * brilho)) for c in self.cor_em(x))
+                     for x in range(2 * self.largura))
+            linhas.append("{" + " ".join(cores) + "}")
+        imagem.put(" ".join(linhas))
+        return imagem
+
+    def start(self):
+        if self.tarefa is None:
+            self.mover()
+
+    def mover(self):
+        self.deslocamento = (self.deslocamento + self.PASSO_PX) % self.largura
+        self.coords(self.item, -self.deslocamento, 0)
+        self.tarefa = self.after(self.INTERVALO_MS, self.mover)
+
+    def stop(self):
+        if self.tarefa is not None:
+            self.after_cancel(self.tarefa)
+            self.tarefa = None
+
+
 class Carregando(ttk.Frame):
-    """Indicador de carregamento: barra que corre e reticências animadas ("Gerando resumo...").
+    """Indicador de carregamento: barra com degradê em movimento e reticências animadas.
 
     Só anima enquanto `iniciar` estiver valendo e some em `parar`. Não bloqueia a janela:
     quem usa deve rodar o trabalho demorado em outra thread (veja App.rodar_em_segundo_plano).
@@ -73,7 +125,7 @@ class Carregando(ttk.Frame):
         self.texto, self.passo, self.tarefa = texto, 0, None
         self.rotulo = ttk.Label(self, anchor="w", foreground="#555555")
         self.rotulo.pack(side="left")
-        self.barra = ttk.Progressbar(self, mode="indeterminate", length=160)
+        self.barra = BarraAurora(self)
 
     def iniciar(self, texto=None):
         if texto:
@@ -81,7 +133,7 @@ class Carregando(ttk.Frame):
         self.rotulo.config(width=len(self.texto) + 3)  # largura fixa: o texto não "pula" ao animar
         if self.tarefa is None:
             self.barra.pack(side="left", padx=8)
-            self.barra.start(12)
+            self.barra.start()
             self.animar()
 
     def animar(self):
