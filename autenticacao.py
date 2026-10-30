@@ -14,9 +14,11 @@ from datetime import datetime, timedelta, timezone
 
 from pymongo import ReturnDocument
 
-ITERACOES = 200_000
+ITERACOES = 600_000          # recomendação atual para PBKDF2-HMAC-SHA256
+ITERACOES_ANTIGAS = 200_000  # contas criadas antes de existir o campo "iteracoes"
 SENHA_MINIMA = 8
-MAX_FALHAS = 5
+MAX_FALHAS = 5               # por usuário (e, na API, por usuário + origem)
+MAX_FALHAS_POR_ORIGEM = 30   # por endereço de origem, para qualquer usuário (barra o chute em massa)
 BLOQUEIO_MINUTOS = 5
 
 # Perfis: um único administrador (o 1º acesso) + até MAX_USUARIOS_EXTRAS usuários de outros perfis.
@@ -48,16 +50,16 @@ def _como_utc(data):
     return data if data.tzinfo else data.replace(tzinfo=timezone.utc)
 
 
-def gerar_hash(senha, salt=None):
+def gerar_hash(senha, salt=None, iteracoes=None):
     """Devolve (salt_hex, hash_hex) da senha. Gera um salt novo se não for informado."""
     salt = salt or os.urandom(16)
-    resultado = hashlib.pbkdf2_hmac("sha256", senha.encode("utf-8"), salt, ITERACOES)
+    resultado = hashlib.pbkdf2_hmac("sha256", senha.encode("utf-8"), salt, iteracoes or ITERACOES)
     return salt.hex(), resultado.hex()
 
 
-def verificar_senha(senha, salt_hex, hash_hex):
+def verificar_senha(senha, salt_hex, hash_hex, iteracoes=None):
     """Confere a senha digitada contra o hash guardado (comparação em tempo constante)."""
-    _, calculado = gerar_hash(senha, bytes.fromhex(salt_hex))
+    _, calculado = gerar_hash(senha, bytes.fromhex(salt_hex), iteracoes or ITERACOES_ANTIGAS)
     return hmac.compare_digest(calculado, hash_hex)
 
 
@@ -98,6 +100,7 @@ def criar_admin(banco, usuario, senha):
         "perfil": PERFIL_ADMIN,
         "salt": salt,
         "hash": hash_senha,
+        "iteracoes": ITERACOES,
         "data_cadastro": _agora(),
     }
     banco.usuarios.insert_one(documento)
@@ -145,7 +148,7 @@ def criar_usuario(banco, usuario, senha, perfil):
             f"Limite atingido: no máximo {MAX_USUARIOS_EXTRAS} usuários além do administrador.")
     salt, hash_senha = gerar_hash(senha)
     documento = {"usuario": nome, "perfil": perfil, "salt": salt, "hash": hash_senha,
-                 "data_cadastro": _agora()}
+                 "iteracoes": ITERACOES, "data_cadastro": _agora()}
     banco.usuarios.insert_one(documento)
     return documento
 
@@ -159,8 +162,9 @@ def trocar_senha(banco, usuario, nova_senha):
     salt, hash_senha = gerar_hash(nova_senha)
     resultado = banco.usuarios.update_one(
         {"usuario": nome},
-        {"$set": {"salt": salt, "hash": hash_senha, "senha_alterada_em": _agora()}})
-    banco.tentativas_login.delete_one({"_id": nome})
+        {"$set": {"salt": salt, "hash": hash_senha, "iteracoes": ITERACOES,
+                  "senha_alterada_em": _agora()}})
+    _limpar_falhas(banco, nome)
     return resultado.matched_count > 0
 
 
@@ -179,50 +183,75 @@ def excluir_usuario(banco, usuario):
     if perfil_do(documento) == PERFIL_ADMIN:
         raise PermissionError("O administrador não pode ser excluído.")
     banco.usuarios.delete_one({"_id": documento["_id"]})
-    banco.tentativas_login.delete_one({"_id": nome})
+    _limpar_falhas(banco, nome)
     return True
 
 
-def segundos_de_bloqueio(banco, usuario):
-    """Segundos que faltam para o usuário poder tentar de novo (0 = liberado)."""
-    registro = banco.tentativas_login.find_one({"_id": usuario})
+def _limpar_falhas(banco, usuario):
+    """Apaga os contadores do usuário, de qualquer origem."""
+    banco.tentativas_login.delete_many({"$or": [{"_id": usuario}, {"usuario": usuario}]})
+
+
+def segundos_de_bloqueio(banco, chave):
+    """Segundos que faltam para a chave (usuário ou origem) poder tentar de novo (0 = liberado)."""
+    registro = banco.tentativas_login.find_one({"_id": chave})
     if not registro or not registro.get("bloqueado_ate"):
         return 0
     restante = (_como_utc(registro["bloqueado_ate"]) - _agora()).total_seconds()
     return int(restante) + 1 if restante > 0 else 0
 
 
-def registrar_falha(banco, usuario):
-    """Conta uma tentativa inválida e bloqueia o usuário ao atingir MAX_FALHAS."""
+def registrar_falha(banco, chave, usuario=None, limite=MAX_FALHAS):
+    """Conta uma tentativa inválida na chave e a bloqueia ao atingir o limite."""
+    campos = {"atualizado_em": _agora()}
+    if usuario:
+        campos["usuario"] = usuario
     registro = banco.tentativas_login.find_one_and_update(
-        {"_id": usuario},
-        {"$inc": {"falhas": 1}, "$set": {"atualizado_em": _agora()}},
+        {"_id": chave},
+        {"$inc": {"falhas": 1}, "$set": campos},
         upsert=True,
         return_document=ReturnDocument.AFTER,
     )
-    if registro["falhas"] >= MAX_FALHAS:
+    if registro["falhas"] >= limite:
         banco.tentativas_login.update_one(
-            {"_id": usuario},
+            {"_id": chave},
             {"$set": {"falhas": 0,
                       "bloqueado_ate": _agora() + timedelta(minutes=BLOQUEIO_MINUTOS)}},
         )
 
 
-def autenticar(banco, usuario, senha):
+def autenticar(banco, usuario, senha, origem=None):
     """Devolve o documento do usuário se as credenciais estiverem corretas, senão None.
 
-    Lança BloqueadoError se o usuário estiver bloqueado por tentativas inválidas.
+    `origem` (na API, o endereço de quem chama) separa os contadores: quem erra a senha de
+    "admin" de um endereço só bloqueia esse endereço, não o administrador de verdade. Além disso
+    cada origem tem um limite geral (MAX_FALHAS_POR_ORIGEM), que também impede encher o banco com
+    usuários inventados. Sem `origem` (tela e terminal, uso local) vale só o limite por usuário.
+
+    Lança BloqueadoError se o usuário (ou a origem) estiver bloqueado por tentativas inválidas.
+    Contas antigas, com menos iterações no hash, são regravadas com o hash atual no login.
     """
     usuario = usuario.strip().lower()
-    restante = segundos_de_bloqueio(banco, usuario)
-    if restante:
-        raise BloqueadoError(restante)
+    chave_usuario = f"{usuario}|{origem}" if origem else usuario
+    chave_origem = f"ip|{origem}" if origem else None
+    for chave in (chave_usuario, chave_origem):
+        restante = segundos_de_bloqueio(banco, chave) if chave else 0
+        if restante:
+            raise BloqueadoError(restante)
 
     documento = banco.usuarios.find_one({"usuario": usuario})
     if not documento:
         gerar_hash(senha)  # gasta o mesmo tempo, para não revelar se o usuário existe
-    elif verificar_senha(senha, documento["salt"], documento["hash"]):
-        banco.tentativas_login.delete_one({"_id": usuario})
-        return documento
-    registrar_falha(banco, usuario)
+    else:
+        iteracoes = documento.get("iteracoes", ITERACOES_ANTIGAS)
+        if verificar_senha(senha, documento["salt"], documento["hash"], iteracoes):
+            banco.tentativas_login.delete_one({"_id": chave_usuario})
+            if iteracoes < ITERACOES:
+                salt, novo = gerar_hash(senha)
+                banco.usuarios.update_one({"_id": documento["_id"]},
+                                          {"$set": {"salt": salt, "hash": novo, "iteracoes": ITERACOES}})
+            return documento
+    registrar_falha(banco, chave_usuario, usuario)
+    if chave_origem:
+        registrar_falha(banco, chave_origem, limite=MAX_FALHAS_POR_ORIGEM)
     return None

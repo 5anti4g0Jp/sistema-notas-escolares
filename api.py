@@ -189,10 +189,12 @@ def criar_app(banco=None):
         return {"usuario": dados.usuario.strip().lower(), "perfil": ADMIN}
 
     @app.post("/login", tags=["Acesso"])
-    def login(dados: LoginIn, response: Response, bd=Depends(obter_banco)):
+    def login(dados: LoginIn, request: Request, response: Response, bd=Depends(obter_banco)):
         """Devolve um token (Bearer). 5 senhas erradas seguidas bloqueiam o usuário por 5 minutos."""
         try:
-            documento = autenticacao.autenticar(bd, dados.usuario, dados.senha)
+            # só o endereço da conexão: X-Forwarded-For seria forjável por quem chama
+            origem = request.client.host if request.client else "desconhecida"
+            documento = autenticacao.autenticar(bd, dados.usuario, dados.senha, origem)
         except autenticacao.BloqueadoError as erro:
             raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS,
                                 f"Muitas tentativas inválidas. Tente de novo em {-(-erro.segundos // 60)} min.",

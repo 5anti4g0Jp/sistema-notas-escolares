@@ -171,3 +171,57 @@ class TestApiProfessores(unittest.TestCase):
         self.c.put("/usuarios/prof/senha", json={"senha": "nova12345"}, headers=self.h)
         self.assertEqual(self.c.get("/me", headers=antigo).status_code, 401)
         self.assertEqual(self.c.get("/me", headers=self.entrar("prof", "nova12345")).status_code, 200)
+
+
+class TestLoginSeguro(unittest.TestCase):
+    """Bloqueio por origem e hash de senha com mais iterações (contas antigas são atualizadas)."""
+
+    def setUp(self):
+        import autenticacao
+        self.aut = autenticacao
+        self.banco = mongomock.MongoClient()["login"]
+        modulo_banco.criar_indices(self.banco)
+        autenticacao.criar_admin(self.banco, "admin", "senha1234")
+
+    def errar(self, usuario, origem, vezes):
+        for _ in range(vezes):
+            self.assertIsNone(self.aut.autenticar(self.banco, usuario, "errada123", origem))
+
+    def test_quem_erra_de_um_endereco_nao_bloqueia_o_admin_de_outro(self):
+        self.errar("admin", "1.1.1.1", self.aut.MAX_FALHAS)
+        with self.assertRaises(self.aut.BloqueadoError):
+            self.aut.autenticar(self.banco, "admin", "senha1234", "1.1.1.1")
+        self.assertIsNotNone(self.aut.autenticar(self.banco, "admin", "senha1234", "2.2.2.2"))
+
+    def test_origem_que_chuta_muitos_usuarios_e_barrada_e_o_lixo_tem_limite(self):
+        for i in range(self.aut.MAX_FALHAS_POR_ORIGEM):
+            self.assertIsNone(self.aut.autenticar(self.banco, f"fantasma{i}", "x1234567", "9.9.9.9"))
+        with self.assertRaises(self.aut.BloqueadoError):
+            self.aut.autenticar(self.banco, "admin", "senha1234", "9.9.9.9")  # nem o usuário real entra
+        registros = self.banco.tentativas_login.count_documents({})
+        self.assertLessEqual(registros, self.aut.MAX_FALHAS_POR_ORIGEM + 1)
+        self.assertIsNotNone(self.aut.autenticar(self.banco, "admin", "senha1234", "2.2.2.2"))
+
+    def test_sem_origem_continua_bloqueando_por_usuario(self):
+        self.errar("admin", None, self.aut.MAX_FALHAS)
+        with self.assertRaises(self.aut.BloqueadoError):
+            self.aut.autenticar(self.banco, "admin", "senha1234")
+
+    def test_trocar_senha_libera_o_bloqueio_de_todas_as_origens(self):
+        self.errar("admin", "1.1.1.1", self.aut.MAX_FALHAS)
+        self.aut.trocar_senha(self.banco, "admin", "nova12345")
+        self.assertIsNotNone(self.aut.autenticar(self.banco, "admin", "nova12345", "1.1.1.1"))
+
+    def test_conta_antiga_e_atualizada_no_login(self):
+        salt, antigo = self.aut.gerar_hash("antiga123", iteracoes=self.aut.ITERACOES_ANTIGAS)
+        self.banco.usuarios.insert_one({"usuario": "velho", "perfil": "consulta", "salt": salt,
+                                        "hash": antigo})  # sem o campo "iteracoes"
+        self.assertIsNotNone(self.aut.autenticar(self.banco, "velho", "antiga123"))
+        doc = self.banco.usuarios.find_one({"usuario": "velho"})
+        self.assertEqual(doc["iteracoes"], self.aut.ITERACOES)
+        self.assertNotEqual(doc["hash"], antigo)
+        self.assertIsNotNone(self.aut.autenticar(self.banco, "velho", "antiga123"))  # segue entrando
+
+    def test_novas_contas_guardam_as_iteracoes(self):
+        self.assertEqual(self.banco.usuarios.find_one({"usuario": "admin"})["iteracoes"], self.aut.ITERACOES)
+        self.assertGreaterEqual(self.aut.ITERACOES, 600_000)

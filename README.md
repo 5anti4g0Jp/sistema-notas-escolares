@@ -51,7 +51,11 @@ Os perfis são administrador, professor e consulta.
   fica ligada ao professor e aparece como "Disciplina - Prof. Nome". Turmas sem alocação continuam
   lançando por disciplina, como antes.
 - Senha do administrador: mínimo 8 caracteres, com letras e números.
-- 5 tentativas inválidas bloqueiam o usuário por 5 minutos (registrado no banco).
+- 5 tentativas inválidas bloqueiam o usuário por 5 minutos (registrado no banco). Na API o bloqueio vale
+  por usuário + endereço de origem, então quem erra a senha do administrador de fora não o tranca para
+  os outros; cada endereço também tem um limite geral de 30 erros por 5 minutos.
+- Senhas guardadas com PBKDF2-HMAC-SHA256 (600 mil iterações); contas antigas são atualizadas no próximo login.
+- Trocar a senha de um usuário invalida os tokens da API que ele já tinha.
 - Excluir aluno ou disciplina (só na tela) apaga também as notas ligadas a ele.
 
 ## Arquivos
