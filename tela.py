@@ -90,7 +90,8 @@ class BarraAurora(tk.Canvas):
         return tuple(a[k] + (b[k] - a[k]) * t for k in range(3))
 
     def gerar_degrade(self):
-        imagem = tk.PhotoImage(width=2 * self.largura, height=self.altura)
+        # master explícito: sem ele o Tk usa a 1ª janela do programa (o Login, já fechada ao abrir a tela principal)
+        imagem = tk.PhotoImage(master=self, width=2 * self.largura, height=self.altura)
         linhas = []
         for y in range(self.altura):
             brilho = 1.18 - 0.38 * y / max(self.altura - 1, 1)  # topo mais claro: acabamento metálico
