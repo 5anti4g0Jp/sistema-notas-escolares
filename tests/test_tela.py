@@ -62,5 +62,65 @@ class TestTela(unittest.TestCase):
         self.assertIn("Usuários", self.abas_visiveis(app))
 
 
+@unittest.skipUnless(TEM_TELA, "sem Tkinter ou sem tela disponível")
+class TestCoresEResumo(unittest.TestCase):
+    def test_media_abaixo_do_minimo_fica_vermelha(self):
+        self.assertEqual(tela.tag_media(5.99), ("fraca",))
+        self.assertEqual(tela.tag_media(6.0), ())  # no limite não é fraca (mesma regra do alerta de risco)
+        self.assertEqual(tela.tag_media(None), ())
+        self.assertEqual(tela.cor_media(4.0), tela.PERIGO)
+        self.assertEqual(tela.cor_media(8.0), tela.BOM)
+        self.assertEqual(tela.cor_media(None), tela.TEXTO)
+
+    def preparar(self):
+        banco = mongomock.MongoClient()["resumo"]
+        modulo_banco.criar_indices(banco)
+        app = tela.App(banco, "ana", autenticacao.PERFIL_ADMIN)
+        self.addCleanup(app.destroy)
+        app.update()
+        return app
+
+    def esperar(self, app, condicao, segundos=5):
+        import time
+        limite = time.time() + segundos
+        while not condicao() and time.time() < limite:
+            app.update()
+            time.sleep(0.02)
+        self.assertTrue(condicao())
+
+    def test_janela_do_resumo_gera_e_mostra_o_texto(self):
+        from unittest import mock
+        app = self.preparar()
+        with mock.patch.object(tela.resumo_ia, "gerar_resumo", return_value="Resumo de teste."):
+            janela = tela.JanelaResumo(app, "Ana", [], 7.0)
+            self.esperar(app, lambda: not janela.em_andamento)
+        self.assertEqual(janela.texto.get("1.0", "end").strip(), "Resumo de teste.")
+        self.assertEqual(str(janela.bt_gerar.cget("state")), "normal")
+        self.assertFalse(janela.carregando.barra.winfo_ismapped())
+
+    def test_erro_da_ia_aparece_na_janela(self):
+        from unittest import mock
+        app = self.preparar()
+        erro = tela.resumo_ia.ResumoIAError("Chave do Gemini não encontrada.")
+        with mock.patch.object(tela.resumo_ia, "gerar_resumo", side_effect=erro):
+            janela = tela.JanelaResumo(app, "Ana", [], 7.0)
+            self.esperar(app, lambda: not janela.em_andamento)
+        self.assertIn("Chave do Gemini", janela.texto.get("1.0", "end"))
+
+    def test_fechar_a_janela_no_meio_nao_da_erro(self):
+        import time
+        from unittest import mock
+        app = self.preparar()
+        with mock.patch.object(tela.resumo_ia, "gerar_resumo", side_effect=lambda *a: time.sleep(0.4) or "tarde"):
+            janela = tela.JanelaResumo(app, "Ana", [], 7.0)
+            app.update()
+            janela.fechar()  # o resultado chega depois e tem de ser descartado em silêncio
+            fim = time.time() + 1.0
+            while time.time() < fim:
+                app.update()
+                time.sleep(0.02)
+        self.assertFalse(janela.winfo_exists())
+
+
 if __name__ == "__main__":
     unittest.main()

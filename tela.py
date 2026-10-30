@@ -9,6 +9,7 @@ import queue
 import threading
 import tkinter as tk
 from datetime import datetime, timezone
+from tkinter import font as tkfont
 from tkinter import messagebox, ttk
 
 from pymongo.errors import DuplicateKeyError, PyMongoError
@@ -21,13 +22,81 @@ from calculos import (PROVAS, SEMESTRES, calcular_media, fmt, ler_nota_opcional,
                       media_da_nota, medias_por_disciplina, montar_boletim,
                       notas_do_aluno, ranking_turmas)
 from config import NOME_BANCO
-from risco import avaliar_aluno, avaliar_todos
+from risco import NOTA_MINIMA, avaliar_aluno, avaliar_todos
+
+# Paleta única da interface (tudo que tem cor no programa sai daqui)
+BG = "#f3f5fa"        # fundo das janelas
+CARTAO = "#ffffff"    # campos, tabelas e áreas de texto
+TEXTO = "#1f2937"
+MUDO = "#5b6475"      # textos de apoio
+ACENTO = "#2f5bd8"    # ação principal e destaques
+ACENTO_ESCURO = "#2449b3"
+BORDA = "#c9d1e3"
+FAIXA = "#e6ebf5"     # cabeçalhos, abas inativas e fundo da barra de carregamento
+SELECAO = "#d6e2fb"
+PERIGO = "#b3261e"    # médias abaixo do mínimo e ações destrutivas
+BOM = "#1b6e3c"
 
 TODAS_TURMAS = "Todas as turmas"
 # O professor só lança notas e consulta; cadastros, vínculos e usuários nem aparecem para ele.
 ABAS_DO_PROFESSOR = ("Lançar notas", "Boletim", "Ranking de turmas", "Alerta de risco")
 COLUNAS_NOTAS = ("Disciplina", "Semestre", "AVG", "AVI", "AVC", "Média")
 LARGURAS_NOTAS = (320, 90, 90, 90, 90, 100)
+
+
+def aplicar_tema(janela):
+    """Deixa todas as janelas com o mesmo visual (base clam, cores da paleta acima)."""
+    janela.configure(background=BG)
+    for nome in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont"):
+        tkfont.nametofont(nome, root=janela).configure(size=10)
+    negrito = tkfont.nametofont("TkDefaultFont", root=janela).copy()
+    negrito.configure(weight="bold")
+    janela.fonte_negrito = negrito  # o Tk apaga a fonte se o Python a descartar; guardar na janela evita isso
+    e = ttk.Style(janela)
+    e.theme_use("clam")
+    e.configure(".", background=BG, foreground=TEXTO, bordercolor=BORDA, lightcolor=BG, darkcolor=BG,
+                troughcolor=FAIXA, focuscolor=ACENTO)
+    e.configure("TFrame", background=BG)
+    e.configure("TLabel", background=BG, foreground=TEXTO)
+    e.configure("TLabelframe", background=BG, bordercolor=BORDA)
+    e.configure("TLabelframe.Label", background=BG, foreground=ACENTO, font=negrito)
+    e.configure("TNotebook", background=BG, borderwidth=0, tabmargins=(0, 4, 0, 0))
+    e.configure("TNotebook.Tab", background=FAIXA, foreground=MUDO, padding=(14, 7), borderwidth=0)
+    e.map("TNotebook.Tab", background=[("selected", BG), ("active", "#dde4f3")],
+          foreground=[("selected", ACENTO)])
+    e.configure("TButton", background=FAIXA, foreground=TEXTO, padding=(12, 6), bordercolor=BORDA,
+                relief="flat")
+    e.map("TButton", background=[("disabled", "#eceff5"), ("pressed", "#cfd8ec"), ("active", "#dbe3f4")],
+          foreground=[("disabled", "#9aa3b5")])
+    e.configure("Acento.TButton", background=ACENTO, foreground="white", bordercolor=ACENTO)
+    e.map("Acento.TButton", background=[("disabled", "#a9b8e6"), ("pressed", ACENTO_ESCURO), ("active", "#3d68e0")],
+          foreground=[("disabled", "white")], bordercolor=[("disabled", "#a9b8e6")])
+    e.configure("Perigo.TButton", foreground=PERIGO)
+    e.map("Perigo.TButton", foreground=[("disabled", "#9aa3b5")])
+    for campo in ("TEntry", "TCombobox", "TSpinbox"):
+        e.configure(campo, fieldbackground=CARTAO, bordercolor=BORDA, padding=4)
+        e.map(campo, bordercolor=[("focus", ACENTO)])
+    e.map("TCombobox", fieldbackground=[("readonly", CARTAO)], selectbackground=[("readonly", CARTAO)],
+          selectforeground=[("readonly", TEXTO)])
+    e.configure("Treeview", background=CARTAO, fieldbackground=CARTAO, foreground=TEXTO, rowheight=26,
+                bordercolor=BORDA)
+    e.map("Treeview", background=[("selected", SELECAO)], foreground=[("selected", TEXTO)])
+    e.configure("Treeview.Heading", background=FAIXA, foreground=TEXTO, relief="flat", padding=(6, 6),
+                font=negrito)
+    e.map("Treeview.Heading", background=[("active", "#dbe3f4")])
+    e.configure("TScrollbar", background="#c3cce0", troughcolor=FAIXA, bordercolor=BORDA, arrowcolor=MUDO)
+
+
+def tag_media(media):
+    """Tag de linha que pinta de vermelho a média abaixo do mínimo (a mesma usada no alerta de risco)."""
+    return ("fraca",) if media is not None and media < NOTA_MINIMA else ()
+
+
+def cor_media(media):
+    """Cor do texto de uma média: vermelho se fraca, verde se ok, normal se não há média."""
+    if media is None:
+        return TEXTO
+    return PERIGO if media < NOTA_MINIMA else BOM
 
 
 def linha_nota(d):
@@ -40,6 +109,7 @@ def criar_tabela(pai, colunas, larguras=None):
     quadro = ttk.Frame(pai)
     quadro.pack(fill="both", expand=True, pady=6)
     tabela = ttk.Treeview(quadro, columns=colunas, show="headings", height=8)
+    tabela.tag_configure("fraca", foreground=PERIGO)
     for i, col in enumerate(colunas):
         alinhamento = "w" if i == 0 else "center"
         tabela.heading(col, text=col, anchor=alinhamento)
@@ -51,11 +121,11 @@ def criar_tabela(pai, colunas, larguras=None):
     return tabela
 
 
-def preencher(tabela, linhas, iids=None):
-    """Troca o conteúdo da tabela. `iids` (opcional) dá um identificador a cada linha."""
+def preencher(tabela, linhas, iids=None, tags=None):
+    """Troca o conteúdo da tabela. `iids` dá um identificador a cada linha; `tags`, as tags (cores)."""
     tabela.delete(*tabela.get_children())
     for i, linha in enumerate(linhas):
-        tabela.insert("", "end", iid=iids[i] if iids else None, values=linha)
+        tabela.insert("", "end", iid=iids[i] if iids else None, values=linha, tags=tags[i] if tags else ())
 
 
 def limpar_campos(*entradas):
@@ -64,18 +134,18 @@ def limpar_campos(*entradas):
 
 
 class BarraAurora(tk.Canvas):
-    """Barra de carregamento com degradê "aurora" (ciano, roxo e azul-escuro) que corre em ciclo lento.
+    """Barra de carregamento com degradê "aurora" (azul, ciano e violeta suaves) que corre em ciclo lento.
 
     O degradê é desenhado uma única vez, numa imagem com dois períodos, e só desliza dentro da barra.
     """
 
-    CORES = ((34, 211, 238), (139, 92, 246), (30, 58, 138))  # ciano, roxo, azul-escuro
+    CORES = ((47, 91, 216), (56, 178, 205), (124, 108, 224))  # azul da interface, ciano e violeta, sem neon
     PASSO_PX = 2
     INTERVALO_MS = 40  # ~50 px/s: um ciclo completo a cada ~4 s com a largura padrão
 
-    def __init__(self, pai, largura=180, altura=14):
+    def __init__(self, pai, largura=160, altura=8):
         super().__init__(pai, width=largura, height=altura, bd=0, highlightthickness=1,
-                         highlightbackground="#8c8c8c", background="#d9d9d9")
+                         highlightbackground=BORDA, background=FAIXA)
         self.largura, self.altura = largura, altura
         self.deslocamento, self.tarefa = 0, None
         self.imagem = self.gerar_degrade()  # guarda a referência, senão o Tk apaga a imagem
@@ -94,7 +164,7 @@ class BarraAurora(tk.Canvas):
         imagem = tk.PhotoImage(master=self, width=2 * self.largura, height=self.altura)
         linhas = []
         for y in range(self.altura):
-            brilho = 1.18 - 0.38 * y / max(self.altura - 1, 1)  # topo mais claro: acabamento metálico
+            brilho = 1.06 - 0.12 * y / max(self.altura - 1, 1)  # leve brilho no topo, sem exagero
             cores = ("#%02x%02x%02x" % tuple(min(255, round(c * brilho)) for c in self.cor_em(x))
                      for x in range(2 * self.largura))
             linhas.append("{" + " ".join(cores) + "}")
@@ -126,7 +196,7 @@ class Carregando(ttk.Frame):
     def __init__(self, pai, texto="Carregando"):
         super().__init__(pai)
         self.texto, self.passo, self.tarefa = texto, 0, None
-        self.rotulo = ttk.Label(self, anchor="w", foreground="#555555")
+        self.rotulo = ttk.Label(self, anchor="w", foreground=MUDO)
         self.rotulo.pack(side="left")
         self.barra = BarraAurora(self)
 
@@ -153,6 +223,70 @@ class Carregando(ttk.Frame):
         self.rotulo.config(text="")
 
 
+class JanelaResumo(tk.Toplevel):
+    """Janela do resumo por IA: já começa a gerar, com a barra de carregamento, sem travar o programa."""
+
+    def __init__(self, app, nome_aluno, semestres, geral):
+        super().__init__(app)
+        self.app, self.semestres, self.geral = app, semestres, geral
+        self.em_andamento = False
+        self.title(f"Resumo por IA - {nome_aluno}")
+        self.geometry("620x330")
+        self.minsize(480, 260)
+        self.transient(app)
+        self.configure(background=BG)
+
+        corpo = ttk.Frame(self, padding=14)
+        corpo.pack(fill="both", expand=True)
+        ttk.Label(corpo, text=f"Aluno: {nome_aluno}", font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        ttk.Label(corpo, text="Só notas e disciplinas são enviadas ao Gemini; nome, matrícula, turma e "
+                              "professor não.", foreground=MUDO).pack(anchor="w", pady=(2, 8))
+        linha = ttk.Frame(corpo)
+        linha.pack(fill="x")
+        self.bt_gerar = ttk.Button(linha, text="Gerar de novo", style="Acento.TButton", command=self.gerar)
+        self.bt_gerar.pack(side="left")
+        self.carregando = Carregando(linha, "Gerando resumo com IA")
+        self.carregando.pack(side="left", padx=12)
+        self.texto = tk.Text(corpo, wrap="word", state="disabled", relief="flat", background=CARTAO,
+                             foreground=TEXTO, padx=10, pady=8, highlightthickness=1,
+                             highlightbackground=BORDA, font=("Segoe UI", 10))
+        self.texto.pack(fill="both", expand=True, pady=(8, 0))
+        self.protocol("WM_DELETE_WINDOW", self.fechar)
+        self.gerar()
+
+    def mostrar(self, texto):
+        self.texto.config(state="normal")
+        self.texto.delete("1.0", "end")
+        self.texto.insert("1.0", texto)
+        self.texto.config(state="disabled")
+
+    def gerar(self):
+        if self.em_andamento:
+            return
+        self.em_andamento = True
+        self.bt_gerar.config(state="disabled")
+        self.mostrar("")
+        self.carregando.iniciar()
+
+        def terminou(texto):
+            if not self.winfo_exists():  # a janela foi fechada no meio: descarta o resultado
+                return
+            self.em_andamento = False
+            self.bt_gerar.config(state="normal")
+            self.carregando.parar()
+            self.mostrar(texto)
+
+        def falhou(erro):
+            terminou(str(erro) if isinstance(erro, resumo_ia.ResumoIAError) else f"Erro inesperado: {erro}")
+
+        self.app.rodar_em_segundo_plano(
+            lambda: resumo_ia.gerar_resumo(self.semestres, self.geral), terminou, falhou)
+
+    def fechar(self):
+        self.carregando.parar()
+        self.destroy()
+
+
 class Login(tk.Tk):
     """Tela inicial: só deixa entrar no sistema quem tem usuário e senha cadastrados."""
 
@@ -166,7 +300,7 @@ class Login(tk.Tk):
         self.title("Sistema de Notas Escolares - Login")
         self.minsize(380, 0)
         self.resizable(False, False)
-        ttk.Style(self).theme_use("clam")
+        aplicar_tema(self)
 
         quadro = ttk.Frame(self, padding=28)
         quadro.pack(fill="both", expand=True)
@@ -196,9 +330,9 @@ class Login(tk.Tk):
                 self.e_codigo.pack(pady=(0, 8))
 
         texto = "Criar administrador" if self.primeiro_acesso else "Entrar"
-        self.botao = ttk.Button(quadro, text=texto, command=self.confirmar)
+        self.botao = ttk.Button(quadro, text=texto, style="Acento.TButton", command=self.confirmar)
         self.botao.pack(pady=10, fill="x")
-        self.lbl_erro = ttk.Label(quadro, text="", foreground="#c0392b", wraplength=320)
+        self.lbl_erro = ttk.Label(quadro, text="", foreground=PERIGO, wraplength=320)
         self.lbl_erro.pack()
 
         self.bind("<Return>", lambda e: self.confirmar())
@@ -268,6 +402,8 @@ class App(tk.Tk):
         self.disciplinas_por_iid = {}
         self.combos_alunos = []
         self.opcoes_nota = {}
+        self.envio_ia_confirmado = False
+        self.janela_resumo = None
         self.mapa_aloc_disc = {}
         self.mapa_professores = {}
         self.professores_por_iid = {}
@@ -276,7 +412,7 @@ class App(tk.Tk):
 
         self.title("Sistema de Notas Escolares")
         self.geometry("1000x720")
-        ttk.Style(self).theme_use("clam")
+        aplicar_tema(self)
 
         barra = ttk.Frame(self, padding=(10, 6))
         barra.pack(fill="x")
@@ -344,9 +480,9 @@ class App(tk.Tk):
     def botoes_crud(self, pai, linha, rotulo_cadastrar, cadastrar, salvar, excluir, limpar):
         quadro = ttk.Frame(pai)
         quadro.grid(row=linha, column=1, sticky="w", padx=8, pady=8)
-        b_cadastrar = ttk.Button(quadro, text=rotulo_cadastrar, command=cadastrar)
+        b_cadastrar = ttk.Button(quadro, text=rotulo_cadastrar, style="Acento.TButton", command=cadastrar)
         b_salvar = ttk.Button(quadro, text="Salvar alterações", command=salvar)
-        b_excluir = ttk.Button(quadro, text="Excluir", command=excluir)
+        b_excluir = ttk.Button(quadro, text="Excluir", style="Perigo.TButton", command=excluir)
         b_cadastrar.pack(side="left")
         b_salvar.pack(side="left", padx=6)
         b_excluir.pack(side="left")
@@ -417,11 +553,11 @@ class App(tk.Tk):
         self.e_busca_aluno.pack(side="left", padx=(4, 8))
         self.e_busca_aluno.bind("<KeyRelease>", lambda e: self.atualizar_tabela_alunos())
         ttk.Button(filtro, text="Limpar filtros", command=self.limpar_filtros_alunos).pack(side="left")
-        self.lbl_contagem_alunos = ttk.Label(filtro, text="", foreground="#555555")
+        self.lbl_contagem_alunos = ttk.Label(filtro, text="", foreground=MUDO)
         self.lbl_contagem_alunos.pack(side="right")
 
         ttk.Label(f, text="Alunos agrupados por turma. Selecione um aluno para editar ou excluir.",
-                  foreground="#555555").pack(anchor="w", pady=(4, 0))
+                  foreground=MUDO).pack(anchor="w", pady=(4, 0))
         quadro = ttk.Frame(f)
         quadro.pack(fill="both", expand=True, pady=6)
         self.tab_alunos = ttk.Treeview(quadro, columns=("matricula", "turma"), show="tree headings", height=8)
@@ -567,7 +703,7 @@ class App(tk.Tk):
         self.botoes_crud(form, 3, "Cadastrar disciplina", self.cadastrar_disciplina,
                          self.salvar_disciplina, self.excluir_disciplina, self.limpar_disciplina)
         ttk.Label(f, text="Selecione uma linha para editar ou excluir.",
-                  foreground="#555555").pack(anchor="w")
+                  foreground=MUDO).pack(anchor="w")
         self.tab_disc = criar_tabela(f, ("Nome", "Código", "Carga horária"), (400, 150, 150))
         self.tab_disc.bind("<<TreeviewSelect>>", self.ao_selecionar_disciplina)
 
@@ -665,13 +801,16 @@ class App(tk.Tk):
         form.pack(fill="x")
         self.e_pnome = self.campo(form, "Nome do professor:", 0)
         ttk.Label(form, text="Pode lecionar:").grid(row=1, column=0, sticky="nw", pady=3)
-        self.lb_habilitadas = tk.Listbox(form, selectmode="multiple", exportselection=False,
-                                         height=5, width=44)
+        self.lb_habilitadas = tk.Listbox(form, selectmode="multiple", exportselection=False, height=5,
+                                         width=44, relief="flat", background=CARTAO, foreground=TEXTO,
+                                         highlightthickness=1, highlightbackground=BORDA,
+                                         highlightcolor=ACENTO, selectbackground=SELECAO,
+                                         selectforeground=TEXTO, activestyle="none")
         self.lb_habilitadas.grid(row=1, column=1, sticky="w", padx=8, pady=3)
         self.botoes_crud(form, 2, "Cadastrar professor", self.cadastrar_professor,
                          self.salvar_professor, self.excluir_professor, self.limpar_professor)
         ttk.Label(f, text="Marque as disciplinas que o professor pode dar. Um professor só pode ser "
-                          "alocado em disciplinas marcadas aqui.", foreground="#555555").pack(anchor="w")
+                          "alocado em disciplinas marcadas aqui.", foreground=MUDO).pack(anchor="w")
         self.tab_prof = criar_tabela(f, ("Professor", "Pode lecionar"), (260, 600))
         self.tab_prof.bind("<<TreeviewSelect>>", self.ao_selecionar_professor)
 
@@ -762,14 +901,14 @@ class App(tk.Tk):
 
         botoes = ttk.Frame(form)
         botoes.grid(row=4, column=1, sticky="w", padx=8, pady=8)
-        b_vincular = ttk.Button(botoes, text="Vincular", command=self.vincular_alocacao)
-        b_remover = ttk.Button(botoes, text="Remover vínculo", command=self.remover_alocacao)
+        b_vincular = ttk.Button(botoes, text="Vincular", style="Acento.TButton", command=self.vincular_alocacao)
+        b_remover = ttk.Button(botoes, text="Remover vínculo", style="Perigo.TButton", command=self.remover_alocacao)
         b_vincular.pack(side="left")
         b_remover.pack(side="left", padx=6)
         self.botoes_cadastro += [b_vincular, b_remover]
         ttk.Label(f, text=("O mesmo professor pode ter várias turmas; a mesma turma pode ter a mesma "
                            "disciplina com professores diferentes."),
-                  foreground="#555555").pack(anchor="w")
+                  foreground=MUDO).pack(anchor="w")
         self.tab_aloc = criar_tabela(f, ("Professor", "Disciplina", "Ano", "Turma"), (260, 300, 80, 200))
 
     def mostrar_professores(self, disciplinas, docentes, alocacoes):
@@ -859,7 +998,7 @@ class App(tk.Tk):
             self.e_provas[nome] = entrada
         self.lbl_media_previa = ttk.Label(form, text="Média: -", font=("Segoe UI", 10, "bold"))
         self.lbl_media_previa.grid(row=4, column=1, sticky="w", padx=8)
-        ttk.Button(form, text="Lançar / atualizar notas", command=self.lancar_nota).grid(
+        ttk.Button(form, text="Lançar / atualizar notas", style="Acento.TButton", command=self.lancar_nota).grid(
             row=5, column=1, sticky="w", padx=8, pady=8)
 
         ttk.Label(f, text="Notas do aluno selecionado:").pack(anchor="w")
@@ -894,7 +1033,8 @@ class App(tk.Tk):
                 valores.append(ler_nota_opcional(entrada.get()))
             except ValueError:
                 valores.append(None)
-        self.lbl_media_previa.config(text=f"Média: {fmt(calcular_media(valores))}")
+        media = calcular_media(valores)
+        self.lbl_media_previa.config(text=f"Média: {fmt(media)}", foreground=cor_media(media))
 
     def preencher_form_notas(self):
         """Se já existem notas para aluno + disciplina + semestre, mostra nos campos para edição."""
@@ -924,7 +1064,8 @@ class App(tk.Tk):
             dados = notas_do_aluno(self.banco, aluno["_id"])
         except PyMongoError as erro:
             return self.erro_banco(erro)
-        preencher(self.tab_notas, [linha_nota(d) for d in dados])
+        preencher(self.tab_notas, [linha_nota(d) for d in dados],
+                  tags=[tag_media(media_da_nota(d)) for d in dados])
 
     def lancar_nota(self):
         if not self.exigir(self.pode_lancar, "lançar notas"):
@@ -1007,30 +1148,19 @@ class App(tk.Tk):
         topo.pack(fill="x")
         self.cb_bol_aluno = self.combo(topo, "Aluno:", 0, self.combos_alunos)
         ttk.Button(topo, text="Ver gráfico", command=self.abrir_grafico).grid(row=0, column=2, padx=8)
+        ttk.Button(topo, text="Resumo por IA", style="Acento.TButton",
+                   command=self.gerar_resumo_ia).grid(row=0, column=3)
         self.lbl_bol = self.quadro_dados_aluno(f)
-        self.lbl_bol_aviso = ttk.Label(f, text="Selecione um aluno para ver o boletim.", foreground="#555555")
+        self.lbl_bol_aviso = ttk.Label(f, text="Selecione um aluno para ver o boletim.", foreground=MUDO)
         self.lbl_bol_aviso.pack(anchor="w")
 
         # rodapé empacotado antes da tabela para nunca ficar cortado
         ttk.Label(f, text=("Média da disciplina = soma das duas maiores notas ÷ 2. "
                            "Média do semestre = média das disciplinas. "
-                           "Média geral = média dos semestres."),
-                  foreground="#555555").pack(side="bottom", anchor="w")
+                           "Média geral = média dos semestres.\nMédia abaixo de 6 aparece em vermelho."),
+                  foreground=MUDO, justify="left").pack(side="bottom", anchor="w")
         self.lbl_media_geral = ttk.Label(f, text="Média geral: -", font=("Segoe UI", 11, "bold"))
         self.lbl_media_geral.pack(side="bottom", anchor="e", pady=(4, 2))
-
-        resumo = ttk.LabelFrame(f, text="Resumo por IA (Gemini)", padding=8)
-        resumo.pack(side="bottom", fill="x", pady=(6, 0))
-        linha = ttk.Frame(resumo)
-        linha.pack(fill="x")
-        self.bt_resumo = ttk.Button(linha, text="Gerar resumo", command=self.gerar_resumo_ia)
-        self.bt_resumo.pack(side="left")
-        self.carregando = Carregando(linha, "Gerando resumo com IA")
-        self.carregando.pack(side="left", padx=10)
-        self.txt_resumo = tk.Text(resumo, height=5, wrap="word", state="disabled", relief="flat",
-                                  background="#f4f4f4", font=("Segoe UI", 10))
-        self.txt_resumo.pack(fill="x", pady=(6, 0))
-        self.resumo_em_andamento = False
 
         quadro = ttk.Frame(f)
         quadro.pack(fill="both", expand=True, pady=6)
@@ -1041,18 +1171,13 @@ class App(tk.Tk):
         for coluna, titulo in (("avg", "AVG"), ("avi", "AVI"), ("avc", "AVC"), ("media", "Média")):
             self.arvore.heading(coluna, text=titulo, anchor="center")
             self.arvore.column(coluna, width=100, anchor="center")
-        self.arvore.tag_configure("semestre", background="#e3eaf7", font=("Segoe UI", 9, "bold"))
+        self.arvore.tag_configure("semestre", background=FAIXA, font=("Segoe UI", 9, "bold"))
+        self.arvore.tag_configure("fraca", foreground=PERIGO)
         barra = ttk.Scrollbar(quadro, orient="vertical", command=self.arvore.yview)
         self.arvore.configure(yscrollcommand=barra.set)
         self.arvore.pack(side="left", fill="both", expand=True)
         barra.pack(side="right", fill="y")
         self.cb_bol_aluno.bind("<<ComboboxSelected>>", lambda e: self.gerar_boletim())
-
-    def mostrar_resumo(self, texto):
-        self.txt_resumo.config(state="normal")
-        self.txt_resumo.delete("1.0", "end")
-        self.txt_resumo.insert("1.0", texto)
-        self.txt_resumo.config(state="disabled")
 
     def rodar_em_segundo_plano(self, funcao, ao_concluir, ao_falhar):
         """Roda `funcao` numa thread, sem travar a janela, e chama o retorno na thread da tela."""
@@ -1080,47 +1205,31 @@ class App(tk.Tk):
         self.after(100, verificar)
 
     def gerar_resumo_ia(self):
-        escolhido = self.cb_bol_aluno.get()
-        aluno = self.mapa_alunos.get(escolhido)
+        aluno = self.mapa_alunos.get(self.cb_bol_aluno.get())
         if not aluno:
             return messagebox.showwarning("Atenção", "Selecione um aluno.")
-        if self.resumo_em_andamento:
-            return
         try:
             semestres, geral, _ = montar_boletim(notas_do_aluno(self.banco, aluno["_id"]))
         except PyMongoError as erro:
             return self.erro_banco(erro)
         if geral is None:
             return messagebox.showinfo("Resumo por IA", "Esse aluno ainda não possui médias para resumir.")
-        if not messagebox.askyesno(
-                "Enviar ao Gemini",
-                "As notas e os nomes das disciplinas serão enviados ao Gemini (serviço externo).\n"
-                "Nome, matrícula, turma e professor NÃO são enviados.\n\nContinuar?"):
-            return
-
-        self.resumo_em_andamento = True
-        self.bt_resumo.config(state="disabled")
-        self.mostrar_resumo("")
-        self.carregando.iniciar()
-
-        def terminou(texto):
-            self.resumo_em_andamento = False
-            self.bt_resumo.config(state="normal")
-            self.carregando.parar()
-            if self.cb_bol_aluno.get() == escolhido:  # se trocou de aluno no meio, descarta
-                self.mostrar_resumo(texto)
-
-        def falhou(erro):
-            mensagem = str(erro) if isinstance(erro, resumo_ia.ResumoIAError) else f"Erro inesperado: {erro}"
-            terminou(mensagem)
-
-        self.rodar_em_segundo_plano(lambda: resumo_ia.gerar_resumo(semestres, geral), terminou, falhou)
+        if not self.envio_ia_confirmado:  # pergunta uma vez por sessão, não a cada clique
+            if not messagebox.askyesno(
+                    "Enviar ao Gemini",
+                    "As notas e os nomes das disciplinas serão enviados ao Gemini (serviço externo).\n"
+                    "Nome, matrícula, turma e professor NÃO são enviados.\n\n"
+                    "Continuar? (Esta pergunta aparece uma vez por sessão.)"):
+                return
+            self.envio_ia_confirmado = True
+        if self.janela_resumo is not None and self.janela_resumo.winfo_exists():
+            self.janela_resumo.fechar()
+        self.janela_resumo = JanelaResumo(self, aluno["nome"], semestres, geral)
 
     def gerar_boletim(self):
         aluno = self.mapa_alunos.get(self.cb_bol_aluno.get())
         if not aluno:
             return messagebox.showwarning("Atenção", "Selecione um aluno.")
-        self.mostrar_resumo("")  # o resumo anterior era de outro aluno
         try:
             dados = notas_do_aluno(self.banco, aluno["_id"])
         except PyMongoError as erro:
@@ -1131,26 +1240,27 @@ class App(tk.Tk):
         self.arvore.delete(*self.arvore.get_children())
         for numero, disciplinas, media in semestres:
             pai = self.arvore.insert("", "end", text=f"{numero}º Semestre", open=True,
-                                     values=("", "", "", fmt(media)), tags=("semestre",))
+                                     values=("", "", "", fmt(media)), tags=("semestre", *tag_media(media)))
             if not disciplinas:
                 self.arvore.insert(pai, "end", text="(sem notas lançadas)")
             for d in disciplinas:
-                self.arvore.insert(pai, "end", text=d["disciplina"], values=(
+                self.arvore.insert(pai, "end", text=d["disciplina"], tags=tag_media(media_da_nota(d)), values=(
                     fmt(d.get("avg")), fmt(d.get("avi")), fmt(d.get("avc")), fmt(media_da_nota(d))))
 
         self.lbl_media_geral.config(
-            text=f"Média geral ({qtd} de {SEMESTRES} semestres com média): {fmt(geral)}")
+            text=f"Média geral ({qtd} de {SEMESTRES} semestres com média): {fmt(geral)}",
+            foreground=cor_media(geral))
         self.lbl_bol_aviso.config(text="" if dados else "Esse aluno ainda não possui notas lançadas.")
 
     # ---------- ranking de turmas ----------
     def montar_aba_ranking(self):
         f = self.aba("Ranking de turmas")
-        self.lbl_rank_aviso = ttk.Label(f, text="", foreground="#555555")
+        self.lbl_rank_aviso = ttk.Label(f, text="", foreground=MUDO)
         self.lbl_rank_aviso.pack(anchor="w", pady=(6, 0))
         self.tab_rank = criar_tabela(f, ("Posição", "Turma", "Alunos", "Notas", "Média geral"),
                                      (80, 300, 100, 100, 130))
         ttk.Label(f, text="Média da turma = média das médias (duas maiores provas) de todas as notas lançadas.",
-                  foreground="#555555").pack(anchor="w")
+                  foreground=MUDO).pack(anchor="w")
 
     def gerar_ranking(self):
         try:
@@ -1158,7 +1268,8 @@ class App(tk.Tk):
         except PyMongoError as erro:
             return self.erro_banco(erro)
         preencher(self.tab_rank, [(i, r["turma"], r["alunos"], r["notas"], fmt(r["media"]))
-                                  for i, r in enumerate(ranking, start=1)])
+                                  for i, r in enumerate(ranking, start=1)],
+                  tags=[tag_media(r["media"]) for r in ranking])
         self.lbl_rank_aviso.config(
             text="" if ranking else "Ainda não há notas com média para gerar o ranking.")
 
@@ -1186,7 +1297,7 @@ class App(tk.Tk):
         ttk.Label(f, text=("Modelo explicável: soma pontos por média baixa, disciplinas abaixo de 6, "
                            "queda entre semestres e dados incompletos. Baixo < 25, médio 25-49, alto ≥ 50. "
                            "É um alerta para apoiar a decisão, não um veredito."),
-                  foreground="#555555", wraplength=940, justify="left").pack(anchor="w")
+                  foreground=MUDO, wraplength=940, justify="left").pack(anchor="w")
 
     def gerar_risco(self):
         try:
@@ -1229,11 +1340,12 @@ class App(tk.Tk):
 
         botoes = ttk.Frame(form)
         botoes.grid(row=3, column=1, sticky="w", padx=8, pady=8)
-        self.bt_criar_usuario = ttk.Button(botoes, text="Criar usuário", command=self.criar_usuario)
+        self.bt_criar_usuario = ttk.Button(botoes, text="Criar usuário", style="Acento.TButton", command=self.criar_usuario)
         self.bt_criar_usuario.pack(side="left")
         ttk.Button(botoes, text="Trocar senha do selecionado",
                    command=self.trocar_senha_usuario).pack(side="left", padx=6)
-        ttk.Button(botoes, text="Excluir selecionado", command=self.excluir_usuario).pack(side="left")
+        ttk.Button(botoes, text="Excluir selecionado", style="Perigo.TButton",
+                   command=self.excluir_usuario).pack(side="left")
         self.lbl_limite_usuarios = ttk.Label(f, text="", font=("Segoe UI", 10, "bold"))
         self.lbl_limite_usuarios.pack(anchor="w", pady=(4, 0))
         self.tab_usuarios = criar_tabela(f, ("Usuário", "Perfil", "Criado em"), (260, 160, 200))
@@ -1241,7 +1353,7 @@ class App(tk.Tk):
                            "excluído).\nProfessor: só lança/edita notas e faz consultas (boletim, gráfico, resumo por IA, "
                            "ranking e alerta de risco); não vê cadastros nem usuários.\nConsulta: apenas visualiza. Para trocar a senha, escolha o usuário na "
                            "tabela e digite a nova senha no campo Senha."),
-                  foreground="#555555", justify="left").pack(anchor="w")
+                  foreground=MUDO, justify="left").pack(anchor="w")
 
     def carregar_usuarios(self):
         try:
